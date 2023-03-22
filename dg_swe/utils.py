@@ -1,6 +1,7 @@
 import numpy as np
 from matplotlib import pyplot as plt
 import torch
+from scipy.interpolate import lagrange as lagrange_poly
 
 
 def gll(N, iterative=False):
@@ -398,11 +399,11 @@ class Interpolate:
             for j, x_ in enumerate(gll_xs):
                     y_data = np.zeros_like(gll_xs)
                     y_data[i] = 1.0
-                    y_poly = lagrange(gll_xs, y_data)
+                    y_poly = lagrange_poly(gll_xs, y_data)
 
                     x_data = np.zeros_like(gll_xs)
                     x_data[j] = 1.0
-                    x_poly = lagrange(gll_xs, x_data)
+                    x_poly = lagrange_poly(gll_xs, x_data)
 
                     self.transform[i, j] = x_poly(xis) * y_poly(etas)
 

@@ -158,5 +158,6 @@ elif mode == 'plot':
 
         im = solver_hr.triangular_plot(ax, vmin=vmin, vmax=vmax, latlong=False, plot_func=interpolate_plot_func)
         plt.colorbar(im[0])
+        plt.savefig(f'./plots/vort_galewsky_{exp}_{int(day)}_days.png')
 
     plt.show()
