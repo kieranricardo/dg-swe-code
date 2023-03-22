@@ -8,16 +8,14 @@ plt.rcParams['font.size'] = '12'
 mode = 'plot'
 dev = 'cpu'
 xlim = np.pi
-ylim = np.pi #4 * np.pi
+ylim = np.pi
 
 nx = ny = 5
 eps = 0.2
 H = 0.2
-g = 8  # advection velocity
+g = 8
 f = 8
 poly_order = 3
-#
-# angle = 30 * (np.pi / 180)
 
 def initial_condition(face):
     lat, long = face.geometry.lat_long(face.xs, face.ys, face.zs)
@@ -71,11 +69,10 @@ for _ in range(1000):
 
 
 plt.figure(1)
-# plt.title("Linear geostrophic balance")
+
 plt.ylabel("Relative L2 error")
 plt.xlabel("Time")
-# print(h_errors)
-# solver.solve(solver.u, solver.v, solver.h, 0, verbose=True)
+
 plt.semilogy(times, h_errors, label='D')
 plt.semilogy(times, vel_errors, label='u')
 plt.legend()

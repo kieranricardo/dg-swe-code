@@ -50,9 +50,6 @@ class DGCubedSphereSWE:
 
             face = self.faces[name]
 
-            x1s = np.array([0.5, 0, -0.5, 0.0])
-            y1s = np.array([0, 0.5, 0.0, -0.5])
-
             for con in face.connections:
                 n, (i1, i2) = con
 
@@ -134,20 +131,14 @@ class DGCubedSphereSWE:
             u = {n: (self.faces[n].u, self.faces[n].v, self.faces[n].w, self.faces[n].h) for n in self.face_names}
             self.boundaries(u)
             k_1 = {n: self.faces[n].solve(*u[n], self.time, dt) for n in self.face_names}
-            # if self.damping is not None:
-            #     self.q_damping(u, k_1, dt)
 
             u_1 = {n: tuple(u[n][i] + dt * k_1[n][i] for i in range(4)) for n in self.face_names}
             self.boundaries(u_1)
             k_2 = {n: self.faces[n].solve(*u_1[n], self.time, dt) for n in self.face_names}
-            # if self.damping is not None:
-            #     self.q_damping(u_1, k_2, dt)
 
             u_2 = {n: tuple(0.75 * u[n][i] + 0.25 * (u_1[n][i] + dt * k_2[n][i]) for i in range(4)) for n in self.face_names}
             self.boundaries(u_2)
             k_3 = {n: self.faces[n].solve(*u_2[n], self.time, dt) for n in self.face_names}
-            # if self.damping is not None:
-            #     self.q_damping(u_2, k_3, dt)
 
             for n in self.face_names:
                 self.faces[n].u = (self.faces[n].u + 2 * (u_2[n][0] + dt * k_3[n][0])) / 3
@@ -183,90 +174,6 @@ class DGCubedSphereSWE:
 
             u = {n: (self.faces[n].u, self.faces[n].v, self.faces[n].w, self.faces[n].h) for n in self.face_names}
             self.boundaries(u)
-
-        elif order == 25:
-            u = {n: (self.faces[n].u, self.faces[n].v, self.faces[n].w, self.faces[n].h) for n in self.face_names}
-            self.boundaries(u)
-            k_1 = {n: self.faces[n].solve(*u[n], self.time, dt) for n in self.face_names}
-
-            u_1 = {n: tuple(u[n][i] + (1 / 8) * dt * k_1[n][i] for i in range(4)) for n in self.face_names}
-            self.boundaries(u_1)
-            k_2 = {n: self.faces[n].solve(*u_1[n], self.time, dt) for n in self.face_names}
-
-            u_2 = {n: tuple(u[n][i] + (1 / 4) * dt * k_2[n][i] for i in range(4)) for n in self.face_names}
-            self.boundaries(u_2)
-            k_3 = {n: self.faces[n].solve(*u_2[n], self.time, dt) for n in self.face_names}
-
-            u_3 = {n: tuple(u[n][i] + (1 / 2) * dt * k_3[n][i] for i in range(4)) for n in self.face_names}
-            self.boundaries(u_3)
-            k_4 = {n: self.faces[n].solve(*u_3[n], self.time, dt) for n in self.face_names}
-
-            u_4 = {n: tuple(u[n][i] + (1 / 4) * dt * k_2[n][i] + (1 / 2) * dt * k_4[n][i] for i in range(4)) for n in self.face_names}
-            self.boundaries(u_4)
-            k_5 = {n: self.faces[n].solve(*u_3[n], self.time, dt) for n in self.face_names}
-
-            for n in self.face_names:
-                self.faces[n].u += 0.5 * dt * k_3[n][0] + 0.5 * dt * k_5[n][0]
-                self.faces[n].v += 0.5 * dt * k_3[n][1] + 0.5 * dt * k_5[n][1]
-                self.faces[n].w += 0.5 * dt * k_3[n][2] + 0.5 * dt * k_5[n][2]
-                self.faces[n].h += 0.5 * dt * k_3[n][3] + 0.5 * dt * k_5[n][3]
-
-        elif order == 2:
-            u = {n: (self.faces[n].u, self.faces[n].v, self.faces[n].w, self.faces[n].h) for n in self.face_names}
-            self.boundaries(u)
-            k_1 = {n: self.faces[n].solve(*u[n], self.time, dt) for n in self.face_names}
-
-            u_1 = {n: tuple(u[n][i] + (dt / 3) * k_1[n][i] for i in range(4)) for n in self.face_names}
-            self.boundaries(u_1)
-            k_2 = {n: self.faces[n].solve(*u_1[n], self.time, dt) for n in self.face_names}
-
-            u_2 = {n: tuple(u[n][i] + (dt / 3) * (k_1[n][i] + k_2[n][i]) for i in range(4)) for n in self.face_names}
-            self.boundaries(u_2)
-            k_3 = {n: self.faces[n].solve(*u_2[n], self.time, dt) for n in self.face_names}
-
-            u_3 = {n: tuple(u[n][i] + (dt / 3) * (k_1[n][i] + k_2[n][i] + k_3[n][i]) for i in range(4)) for n in self.face_names}
-            self.boundaries(u_3)
-            k_4 = {n: self.faces[n].solve(*u_3[n], self.time, dt) for n in self.face_names}
-
-            for n in self.face_names:
-                self.faces[n].u += 0.25 * dt * (k_1[n][0] + k_2[n][0] + k_3[n][0] + k_4[n][0])
-                self.faces[n].v += 0.25 * dt * (k_1[n][1] + k_2[n][1] + k_3[n][1] + k_4[n][1])
-                self.faces[n].w += 0.25 * dt * (k_1[n][2] + k_2[n][2] + k_3[n][2] + k_4[n][2])
-                self.faces[n].h += 0.25 * dt * (k_1[n][3] + k_2[n][3] + k_3[n][3] + k_4[n][3])
-
-            # u = {n: (self.faces[n].u, self.faces[n].v, self.faces[n].w, self.faces[n].h) for n in self.face_names}
-            # self.boundaries(u)
-            # k_1 = {n: self.faces[n].solve(*u[n], self.time, dt) for n in self.face_names}
-            #
-            # u_1 = {n: tuple(u[n][i] + (dt / 3) * k_1[n][i] for i in range(4)) for n in self.face_names}
-            # self.boundaries(u_1)
-            # k_2 = {n: self.faces[n].solve(*u_1[n], self.time, dt) for n in self.face_names}
-            #
-            # u_2 = {n: tuple(u_1[n][i] + (dt / 3) * k_2[n][i] for i in range(4)) for n in self.face_names}
-            # self.boundaries(u_2)
-            # k_3 = {n: self.faces[n].solve(*u_2[n], self.time, dt) for n in self.face_names}
-            #
-            # u_3 = {n: tuple(u_2[n][i] + (dt / 3) * k_3[n][i] for i in range(4)) for n in self.face_names}
-            # self.boundaries(u_3)
-            # k_4 = {n: self.faces[n].solve(*u_3[n], self.time, dt) for n in self.face_names}
-            #
-            # for n in self.face_names:
-            #     self.faces[n].u = (self.faces[n].u + dt * k_4[n][0] + 3 * u_3[n][0]) / 4
-            #     self.faces[n].v = (self.faces[n].v + dt * k_4[n][1] + 3 * u_3[n][1]) / 4
-            #     self.faces[n].w = (self.faces[n].w + dt * k_4[n][2] + 3 * u_3[n][2]) / 4
-            #     self.faces[n].h = (self.faces[n].h + dt * k_4[n][3] + 3 * u_3[n][3]) / 4
-
-        elif order == 1:
-            u = {n: (self.faces[n].u, self.faces[n].v, self.faces[n].w, self.faces[n].h) for n in self.face_names}
-            self.boundaries(u)
-            k_1 = {n: self.faces[n].solve(*u[n], self.time, dt) for n in self.face_names}
-
-            u_1 = {n: tuple(u[n][i] + dt * k_1[n][i] for i in range(4)) for n in self.face_names}
-            for n in self.face_names:
-                self.faces[n].u = u_1[n][0]
-                self.faces[n].v = u_1[n][1]
-                self.faces[n].w = u_1[n][2]
-                self.faces[n].h = u_1[n][3]
 
         for n in self.face_names:
             self.faces[n].time += dt
@@ -370,13 +277,10 @@ class DGCubedSphereSWE:
         plt.figure(fig_int, figsize=(7, 7))
 
         tunit = ' (days)'
-        # fig, axs = plt.subplots(2, 2, figsize=(7, 7), sharex=True)
         plt.suptitle("Conservation errors")
 
         ax = plt.subplot(2, 2, 1)
-        # ax = axs[0][0]
         ax.set_ylabel("Energy error (normalized)")
-        # ax.set_xlabel("Time" + tunit)
         ax.set_xticks([], [])
         ax.plot(times, (entropy - entropy[0]) / entropy[0], label=label)
         ax.set_yscale('symlog', linthresh=1e-15)
@@ -397,7 +301,6 @@ class DGCubedSphereSWE:
         ax.grid(True, which='both')
 
         ax = plt.subplot(2, 2, 4)
-        # ax = axs[1][1]
         plt.ylabel("Vorticity error")
         plt.xlabel("Time" + tunit)
         plt.plot(times, (vorticity - vorticity[0]), label=label)
@@ -479,7 +382,6 @@ class DGCubedSphereFace:
         self.l1d = lagrange1st(poly_order, xs_1d)
         n = poly_order + 1
 
-        # self.K = self.K.reshape((-1, n * n * 2)).transpose()
         self.device = torch.device(device)
         self.n = n
         self.weights = torch.from_numpy(self.weights.astype(self.dtype)).to(self.device)
@@ -520,11 +422,6 @@ class DGCubedSphereFace:
         )
         self.J_horzface = torch.sqrt(sum(x_ ** 2 for x_ in cross))
 
-        # self.J = self.dxdxi * self.dydeta - self.dxdeta * self.dydxi
-        # self.J = torch.sqrt(self.dxdxi ** 2 + self.dydxi ** 2)
-        # self.Jx = self.dxdxi * self.dxdxi
-        # self.Jy = torch.sqrt(self.dxdeta ** 2 + self.dydeta ** 2)
-
         self.J = self.dxdxi * (self.dydeta * self.dzdzeta - self.dydzeta * self.dzdeta)
         self.J += self.dydxi * (self.dzdeta * self.dxdzeta - self.dzdzeta * self.dxdeta)
         self.J += self.dzdxi * (self.dxdeta * self.dydzeta - self.dxdzeta * self.dydeta)
@@ -552,12 +449,6 @@ class DGCubedSphereFace:
         self.kx = torch.from_numpy(self.xs.astype(self.dtype)).to(self.device) / radius
         self.ky = torch.from_numpy(self.ys.astype(self.dtype)).to(self.device) / radius
         self.kz = torch.from_numpy(self.zs.astype(self.dtype)).to(self.device) / radius
-
-        # self.dxidx = self.dydeta / self.J
-        # self.dxidy = -self.dxdeta / self.J
-        #
-        # self.detadx = -self.dydxi / self.J
-        # self.detady = self.dxdxi / self.J
 
         self.J_xi = np.sqrt(self.dxidx ** 2 + self.dxidy ** 2 + self.dxidz ** 2)
         self.J_eta = np.sqrt(self.detadx ** 2 + self.detady ** 2 + self.detadz ** 2)
@@ -697,20 +588,14 @@ class DGCubedSphereFace:
             v_1 = self.v + dt * vk_1
             w_1 = self.w + dt * wk_1
             h_1 = self.h + dt * hk_1
-            # if self.solution is not None:
-            #     self.enforce_dirichlet(u_1, v_1, h_1, self.time + dt)
-            uk_2, vk_2, wk_2, hk_2 = self.solve(u_1, v_1, w_1, h_1, self.time + dt, dt)
-            if forcing is not None: self.apply_forcing(uk_2, vk_2, hk_2, self.time + dt, forcing)
 
-            u_2 = 0.75 * self.u + 0.25 * (
-                    u_1 + uk_2 * dt)  # self.u + dt * uk_1
+            uk_2, vk_2, wk_2, hk_2 = self.solve(u_1, v_1, w_1, h_1, self.time + dt, dt)
+
+            u_2 = 0.75 * self.u + 0.25 * (u_1 + uk_2 * dt)
             v_2 = 0.75 * self.v + 0.25 * (v_1 + vk_2 * dt)
             w_2 = 0.75 * self.w + 0.25 * (w_1 + wk_2 * dt)
             h_2 = 0.75 * self.h + 0.25 * (h_1 + hk_2 * dt)
-            # if self.solution is not None:
-            #     self.enforce_dirichlet(u_2, v_2, h_2, self.time + 0.5 * dt)
             uk_3, vk_3, wk_3, hk_3 = self.solve(u_2, v_2, w_2, h_2, self.time + 0.5 * dt, dt)
-            if forcing is not None: self.apply_forcing(uk_3, vk_3, hk_3, self.time + 0.5 * dt, forcing)
 
             self.u = (self.u + 2 * (u_2 + dt * uk_3)) / 3
             self.v = (self.v + 2 * (v_2 + dt * vk_3)) / 3
@@ -1059,7 +944,6 @@ class DGCubedSphereFace:
         return 0.5 * (u ** 2 + v ** 2 + w ** 2) + self.g * h
 
     def wave_speed(self, u, v, w, h):
-        # return torch.maximum(abs(u), abs(v)) + torch.sqrt(self.g * h)
         return torch.sqrt(u ** 2 + v ** 2 + w ** 2) + np.sqrt(self.g * h)
 
     def solve(self, u, v, w, h, t, dt, *, verbose=False):
@@ -1102,8 +986,8 @@ class DGCubedSphereFace:
         c_left = self.wave_speed(self.u_left, self.v_left, self.w_left, self.h_left)
         c_ho = 0.5 * (c_right + c_left)
 
-        h_flux_vert = 0.5 * (h_up_flux + h_down_flux)  # - self.a * (c_ve / self.g) * (uv_up_flux - uv_down_flux)
-        h_flux_horz = 0.5 * (h_right_flux + h_left_flux)  # - self.a * (c_ho / self.g) * (uv_right_flux - uv_left_flux)
+        h_flux_vert = 0.5 * (h_up_flux + h_down_flux)
+        h_flux_horz = 0.5 * (h_right_flux + h_left_flux)
 
         self.tmp1[:, :, -1] = (h_flux_vert[1:] - h_down_flux[1:]) * (self.weights_x * self.J_vertface[:, :, -1])
         self.tmp1[:, :, 0] = -(h_flux_vert[:-1] - h_up_flux[:-1]) * (self.weights_x * self.J_vertface[:, :, 0])
@@ -1139,9 +1023,6 @@ class DGCubedSphereFace:
         v_cov_right = self.u_right * self.dxdeta_right + self.v_right * self.dydeta_right + self.w_right * self.dzdeta_right
         v_cov_left = self.u_left * self.dxdeta_left + self.v_left * self.dydeta_left + self.w_left * self.dzdeta_left
 
-        # u_perp_down, u_perp_up, u_perp_left, u_perp_right = (u_perp / self.J)[:, :, -1], (u_perp / self.J)[:, :, 0], (u_perp / self.J)[:, :, :, -1], (u_perp / self.J)[:, :, :, 0]
-        # v_perp_down, v_perp_up, v_perp_left, v_perp_right = (v_perp / self.J)[:, :, -1], (v_perp / self.J)[:, :, 0], (v_perp / self.J)[:, :, :, -1], (v_perp / self.J)[:, :, :, 0]
-
         vel_p_up = cross_product([self.kx_up, self.ky_up, self.kz_up], [self.u_up, self.v_up, self.w_up])
         u_perp_up = vel_p_up[0] * self.dxdxi_up + vel_p_up[1] * self.dydxi_up + vel_p_up[2] * self.dzdxi_up
         v_perp_up = vel_p_up[0] * self.dxdeta_up + vel_p_up[1] * self.dydeta_up + vel_p_up[2] * self.dzdeta_up
@@ -1157,13 +1038,6 @@ class DGCubedSphereFace:
         vel_p_left = cross_product([self.kx_left, self.ky_left, self.kz_left], [self.u_left, self.v_left, self.w_left])
         u_perp_left = vel_p_left[0] * self.dxdxi_left + vel_p_left[1] * self.dydxi_left + vel_p_left[2] * self.dzdxi_left
         v_perp_left = vel_p_left[0] * self.dxdeta_left + vel_p_left[1] * self.dydeta_left + vel_p_left[2] * self.dzdeta_left
-
-        # u_perp_horz = 0.5 * (u_perp_left + u_perp_right)
-        # v_perp_horz = 0.5 * (v_perp_left + v_perp_right)
-        # u_perp_vert = 0.5 * (u_perp_down + u_perp_up)
-        # v_perp_vert = 0.5 * (v_perp_down + v_perp_up)
-
-        # [[ (grad q . i) u^* ]] [[ u . t ]]
 
         # handle u
         #######
@@ -1208,46 +1082,6 @@ class DGCubedSphereFace:
         u_k, v_k, w_k = self.cov_to_phys(u_k, v_k, 0)
 
         return u_k, v_k, w_k, h_k
-
-    def riemann_solve(self):
-        # normal velocities
-        vel_up = self.v_up * self.eta_y_up + self.u_up * self.eta_x_up + self.w_up * self.eta_z_up
-        vel_down = self.v_down * self.eta_y_down + self.u_down * self.eta_x_down + self.w_down * self.eta_z_down
-        vel_right = self.v_right * self.xi_y_right + self.u_right * self.xi_x_right + self.w_right * self.xi_z_right
-        vel_left = self.v_left * self.xi_y_left + self.u_left * self.xi_x_left + self.w_left * self.xi_z_left
-
-        char_up = vel_up - torch.sqrt(self.g * self.h_up)
-        char_down = vel_down + torch.sqrt(self.g * self.h_down)
-        char_left = vel_right - torch.sqrt(self.g * self.h_right)
-        char_right = vel_left + torch.sqrt(self.g * self.h_left)
-
-        u_horz = 0.5 * (char_left + char_right)
-        v_vert = 0.5 * (char_up + char_down)
-        h_horz = (0.25 / self.g) * (char_left - char_right) ** 2
-        h_vert = (0.25 / self.g) * (char_up - char_down) ** 2
-
-        h_flux_vert = v_vert * h_vert
-        h_flux_horz = u_horz * h_horz
-
-        uv_flux_vert = 0.5 * v_vert ** 2 + self.g * h_vert
-        uv_flux_horz = 0.5 * u_horz ** 2 + self.g * h_horz
-
-        vel_p = cross_product([self.kx_up, self.ky_up, self.kz_up], [self.u_up, self.v_up, self.w_up])
-        vel_up = vel_p[1] * self.eta_y_up + vel_p[0] * self.eta_x_up + vel_p[2] * self.eta_z_up
-        vel_p = cross_product([self.kx_down, self.ky_down, self.kz_down], [self.u_down, self.v_down, self.w_down])
-        vel_down = vel_p[1] * self.eta_y_down + vel_p[0] * self.eta_x_down + vel_p[2] * self.eta_z_down
-
-        uv_flux_vert += 0.25 * (vel_up ** 2 + vel_down ** 2)
-
-        vel_p = cross_product([self.kx_right, self.ky_right, self.kz_right], [self.u_right, self.v_right, self.w_right])
-        vel_right = vel_p[1] * self.xi_y_right + vel_p[0] * self.xi_x_right + vel_p[2] * self.xi_z_right
-        vel_p = cross_product([self.kx_left, self.ky_left, self.kz_left], [self.u_left, self.v_left, self.w_left])
-        vel_left = vel_p[1] * self.xi_y_left + vel_p[0] * self.xi_x_left + vel_p[2] * self.xi_z_left
-
-        uv_flux_horz += 0.25 * (vel_right ** 2 + vel_left ** 2)
-
-        return h_flux_horz, h_flux_vert, uv_flux_horz, uv_flux_vert
-
 
     def phys_to_contra(self, u, v, w):
         u_contra = u * self.dxidx + v * self.dxidy + w * self.dxidz

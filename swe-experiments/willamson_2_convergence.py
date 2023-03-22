@@ -13,9 +13,6 @@ g = 9.80616
 f = 7.292e-5
 radius = 6.37122e6
 poly_order = 3
-#
-# angle = 30 * (np.pi / 180)
-
 
 def initial_condition(face):
     lat, long = face.geometry.lat_long(face.xs, face.ys, face.zs)
@@ -36,8 +33,6 @@ def initial_condition(face):
 
     return u, v, w, h
 
-
-#(F1p + F2p) * (F1 + F2p) = F1p
 
 exps = ['Cons.', 'Diss.']
 coeffs = [0.5, 0.0]
@@ -73,8 +68,6 @@ for exp, a in zip(exps, coeffs):
         u_norm = np.sqrt(sum(face.integrate(face.u ** 2 + face.v ** 2 + face.w ** 2) for face in solver.faces.values()))
 
         while solver.time < tend:
-            # if solver.time > 3600 * 24:
-            #     solver.damping = 'adaptive'
             dt = solver.get_dt()
             dt = min(dt, tend - solver.time)
             solver.time_step(dt=dt)

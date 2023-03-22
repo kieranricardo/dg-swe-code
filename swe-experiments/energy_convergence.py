@@ -63,7 +63,6 @@ def initial_condition(face):
 
     return u, v, w, h
 
-cfls = np.array([0.8, 0.6, 0.4, 0.2])
 dts = np.array([50, 40, 30, 20, 10]).astype(np.float64)
 energy_errors = []
 tend = 10 * 24 * 3600 # 10 days
@@ -79,9 +78,7 @@ for dt in dts:
     for face in solver.faces.values():
         face.set_initial_condition(*initial_condition(face))
 
-    # dt = solver.get_dt()
     while solver.time < tend:
-        # dt = solver.get_dt()
         dt = min(dt, tend - solver.time)
         solver.time_step(dt=dt)
 
