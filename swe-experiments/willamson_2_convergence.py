@@ -34,7 +34,7 @@ def initial_condition(face):
     return u, v, w, h
 
 
-exps = ['Cons.', 'Diss.']
+exps = ['Diss.', 'Cons.']
 coeffs = [0.5, 0.0]
 
 ns = np.array([3, 5, 10, 15, 30]) #, 25, 30])
