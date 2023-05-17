@@ -2,6 +2,10 @@ from matplotlib import pyplot as plt
 import numpy as np
 from scipy.stats import linregress
 from dg_swe.dg_cubed_sphere_swe import DGCubedSphereSWE
+import os
+
+if not os.path.exists('./plots'): os.makedirs('./plots')
+if not os.path.exists('./data'): os.makedirs('./data')
 
 plt.rcParams['font.size'] = '12'
 

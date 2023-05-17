@@ -2,6 +2,10 @@ from matplotlib import pyplot as plt
 from dg_swe.linear_cubed_sphere_swe import LinearCubedSphereSWE
 import numpy as np
 import torch
+import os
+
+if not os.path.exists('./plots'): os.makedirs('./plots')
+if not os.path.exists('./data'): os.makedirs('./data')
 
 plt.rcParams['font.size'] = '12'
 
