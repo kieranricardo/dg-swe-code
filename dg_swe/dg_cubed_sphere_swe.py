@@ -189,7 +189,7 @@ class DGCubedSphereSWE:
         else:
             raise ValueError(f"dim: expected one of 2, 3. Found {dim}.")
 
-    def triangular_plot(self, ax, vmin=None, vmax=None, plot_func=None, cmap='nipy_spectral', latlong=False):
+    def triangular_plot(self, ax, vmin=None, vmax=None, plot_func=None, cmap='nipy_spectral', latlong=False, n=None):
         data = [plot_func(face).ravel() for face in self.faces.values()]
         if not latlong:
             x_coords = [face.xs.ravel() for face in self.faces.values()]
@@ -211,7 +211,9 @@ class DGCubedSphereSWE:
         else:
             mask = z_coords > 0
 
-        n = int(0.5 * (vmax - vmin) / 1e-5)
+        if n is None:
+            n = int(0.5 * (vmax - vmin) / 1e-5)
+
         levels = np.linspace(vmin, vmax, n)
         print('Num levels', n)
         ax.tricontour(
@@ -671,98 +673,6 @@ class DGCubedSphereFace:
 
         q = self.q(u, v, w, h)
         return 0.5 * h * q ** 2
-
-    def vorticity(self, u=None, v=None, w=None, h=None):
-        if u is None:
-            u = self.u
-        if v is None:
-            v = self.v
-        if w is None:
-            w = self.w
-        if h is None:
-            h = self.h
-
-        vort = self.dg_vort(u, v, w, h)
-
-        vort_sum = torch.zeros_like(vort) + vort * self.J * self.weights
-        h_sum = self.J * self.weights
-
-        Jw = self.J * self.weights
-
-        h_sum[0, :, 0] = h_sum[0, :, 0] + Jw[0, :, 0]
-        h_sum[-1, :, -1] = h_sum[-1, :, -1] + Jw[-1, :, -1]
-        h_sum[:, 0, :, 0] = h_sum[:, 0, :, 0] + Jw[:, 0, :, 0]
-        h_sum[:, -1, :, -1] = h_sum[:, -1, :, -1] + Jw[:, -1, :, -1]
-
-        vort_sum[0, :, 0] = vort_sum[0, :, 0] + self.vort_down[0] * Jw[0, :, 0]
-        vort_sum[-1, :, -1] = vort_sum[-1, :, -1] + self.vort_up[-1] * Jw[-1, :, -1]
-        vort_sum[:, 0, :, 0] = vort_sum[:, 0, :, 0] + self.vort_left[:, 0] * Jw[:, 0, :, 0]
-        vort_sum[:, -1, :, -1] = vort_sum[:, -1, :, -1] + self.vort_right[:, -1] * Jw[:, -1, :, -1]
-
-        for tnsr in [vort_sum, h_sum]:
-            tnsr[:, 1:, :, 0] = tnsr[:, 1:, :, 0] + tnsr[:, :-1, :, -1]
-            tnsr[:, :-1, :, -1] = tnsr[:, 1:, :, 0]
-
-            tnsr[1:, :, 0] = tnsr[1:, :, 0] + tnsr[:-1, :, -1]
-            tnsr[:-1, :, -1] = tnsr[1:, :, 0]
-
-            if self.xperiodic:
-                tnsr[:, 0, :, 0] = tnsr[:, 0, :, 0] + tnsr[:, -1, :, -1]
-                tnsr[:, -1, :, -1] = tnsr[:, 0, :, 0]
-
-            if self.yperiodic:
-                tnsr[0, :, 0] = tnsr[0, :, 0] + tnsr[-1, :, -1]
-                tnsr[-1, :, -1] = tnsr[0, :, 0]
-
-        vort = vort_sum / h_sum
-
-        return vort
-
-    def vorticity(self, u=None, v=None, w=None, h=None):
-        if u is None:
-            u = self.u
-        if v is None:
-            v = self.v
-        if w is None:
-            w = self.w
-        if h is None:
-            h = self.h
-
-        vort = self.dg_vort(u, v, w, h)
-
-        vort_sum = torch.zeros_like(vort) + vort * self.J * self.weights
-        h_sum = self.J * self.weights
-
-        Jw = self.J * self.weights
-
-        h_sum[0, :, 0] = h_sum[0, :, 0] + Jw[0, :, 0]
-        h_sum[-1, :, -1] = h_sum[-1, :, -1] + Jw[-1, :, -1]
-        h_sum[:, 0, :, 0] = h_sum[:, 0, :, 0] + Jw[:, 0, :, 0]
-        h_sum[:, -1, :, -1] = h_sum[:, -1, :, -1] + Jw[:, -1, :, -1]
-
-        vort_sum[0, :, 0] = vort_sum[0, :, 0] + self.vort_down[0] * Jw[0, :, 0]
-        vort_sum[-1, :, -1] = vort_sum[-1, :, -1] + self.vort_up[-1] * Jw[-1, :, -1]
-        vort_sum[:, 0, :, 0] = vort_sum[:, 0, :, 0] + self.vort_left[:, 0] * Jw[:, 0, :, 0]
-        vort_sum[:, -1, :, -1] = vort_sum[:, -1, :, -1] + self.vort_right[:, -1] * Jw[:, -1, :, -1]
-
-        for tnsr in [vort_sum, h_sum]:
-            tnsr[:, 1:, :, 0] = tnsr[:, 1:, :, 0] + tnsr[:, :-1, :, -1]
-            tnsr[:, :-1, :, -1] = tnsr[:, 1:, :, 0]
-
-            tnsr[1:, :, 0] = tnsr[1:, :, 0] + tnsr[:-1, :, -1]
-            tnsr[:-1, :, -1] = tnsr[1:, :, 0]
-
-            if self.xperiodic:
-                tnsr[:, 0, :, 0] = tnsr[:, 0, :, 0] + tnsr[:, -1, :, -1]
-                tnsr[:, -1, :, -1] = tnsr[:, 0, :, 0]
-
-            if self.yperiodic:
-                tnsr[0, :, 0] = tnsr[0, :, 0] + tnsr[-1, :, -1]
-                tnsr[-1, :, -1] = tnsr[0, :, 0]
-
-        vort = vort_sum / h_sum
-
-        return vort
 
     def dEdt(self):
         u, v, w, h = self.u, self.v, self.w, self.h

@@ -45,6 +45,27 @@ ns = np.array([3, 5, 10, 15, 30]) #, 25, 30])
 grid_spacing = 360 / (ns * 4 * 3)
 tend = 5.0 * 24 * 3600
 
+
+solver = DGCubedSphereSWE(
+    poly_order, 30, 30, g, f,
+    eps, device=dev, solution=None, a=0.5, radius=radius,
+    dtype=np.float64, damping=None
+)
+
+for face in solver.faces.values():
+    face.set_initial_condition(*initial_condition(face))
+
+fig = plt.figure()
+ax = fig.add_subplot(111)
+ax.set_xlabel("x (km)")
+ax.set_ylabel("y (km)")
+
+vmin = min(f.h.min() for f in solver.faces.values())
+vmax = max(f.h.max() for f in solver.faces.values())
+im = solver.triangular_plot(ax, latlong=False, vmin=vmin, vmax=vmax, plot_func=lambda s: s.h, n=20)
+plt.colorbar(im[0])
+plt.savefig('./plots/williamson_2_ic.png')
+
 for exp, a in zip(exps, coeffs):
     h_errors = []
     vel_errors = []

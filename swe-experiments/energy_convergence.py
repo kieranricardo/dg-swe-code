@@ -98,7 +98,7 @@ print('Energy convergence:', r)
 
 plt.figure(1)
 plt.ylabel("Relative L2 error")
-plt.xlabel("Timestep (s)")
+plt.xlabel("$\Delta t$ (s)")
 plt.loglog(dts, energy_errors, '--o', label="Energy error")
 #
 plt.plot(dts, 0.8 * energy_errors[0] * (dts[0] ** -3) * (dts ** 3), linestyle='--', label='3rd order')
