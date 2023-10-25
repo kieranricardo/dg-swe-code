@@ -216,11 +216,11 @@ class DGCubedSphereSWE:
 
         levels = np.linspace(vmin, vmax, n)
         print('Num levels', n)
-        ax.tricontour(
-            x_coords[mask], y_coords[mask], data[mask], colors='black',
-            levels=levels, negative_linestyles='dashed', linewidths=0.5
-        )
-        return [ax.tricontourf(x_coords[mask], y_coords[mask], data[mask], cmap=cmap, levels=levels)]
+        # ax.tricontour(
+        #     x_coords[mask], y_coords[mask], data[mask], colors='black',
+        #     levels=levels, negative_linestyles='dashed', linewidths=0.5
+        # )
+        return [ax.tricontourf(-y_coords[mask], x_coords[mask], data[mask], cmap=cmap, levels=levels)]
 
     def integrate(self, q):
         return sum(f.integrate(q[n]) for n, f in self.faces.items())
