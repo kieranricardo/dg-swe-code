@@ -189,7 +189,7 @@ class DGCubedSphereSWE:
         else:
             raise ValueError(f"dim: expected one of 2, 3. Found {dim}.")
 
-    def triangular_plot(self, ax, vmin=None, vmax=None, plot_func=None, cmap='nipy_spectral', latlong=False, n=None):
+    def triangular_plot(self, ax, vmin=None, vmax=None, plot_func=None, cmap='nipy_spectral', latlong=False, n=None, lines=False):
         data = [plot_func(face).ravel() for face in self.faces.values()]
         if not latlong:
             x_coords = [face.xs.ravel() for face in self.faces.values()]
@@ -216,11 +216,49 @@ class DGCubedSphereSWE:
 
         levels = np.linspace(vmin, vmax, n)
         print('Num levels', n)
-        # ax.tricontour(
-        #     x_coords[mask], y_coords[mask], data[mask], colors='black',
-        #     levels=levels, negative_linestyles='dashed', linewidths=0.5
-        # )
-        return [ax.tricontourf(-y_coords[mask], x_coords[mask], data[mask], cmap=cmap, levels=levels)]
+
+        if lines:
+            out = ax.tricontour(
+                -y_coords[mask], x_coords[mask], data[mask], colors='black',
+                levels=levels, negative_linestyles='dashed', linewidths=0.5
+            )
+        else:
+            out = ax.tricontourf(
+                -y_coords[mask], x_coords[mask], data[mask], cmap=cmap, levels=levels
+            )
+        return [out]
+
+    def latlong_triangular_plot(self, ax, vmin=None, vmax=None, plot_func=None, cmap='nipy_spectral', n=None, lines=False):
+        data = [plot_func(face).ravel() for face in self.faces.values()]
+
+        x_coords = [face.geometry.lat_long(face.xs, face.ys, face.zs)[1].ravel() for face in self.faces.values()]
+        y_coords = [face.geometry.lat_long(face.xs, face.ys, face.zs)[0].ravel() for face in self.faces.values()]
+
+        data = np.concatenate(data)
+        y_coords = np.concatenate(y_coords)
+        x_coords = np.concatenate(x_coords)
+
+        y_coords *= 180 / np.pi
+        x_coords *= 180 / np.pi
+        # mask = (10 <= y_coords) & (y_coords <= 80)
+        mask = np.ones_like(x_coords) > 0
+
+        if n is None:
+            n = int(0.5 * (vmax - vmin) / 1e-5)
+
+        levels = np.linspace(vmin, vmax, n)
+        print('Num levels', n)
+
+        if lines:
+            out = ax.tricontour(
+                x_coords[mask], y_coords[mask], data[mask], colors='black',
+                levels=levels, negative_linestyles='dashed', linewidths=0.5
+            )
+        else:
+            out = ax.tricontourf(
+                x_coords[mask], y_coords[mask], data[mask], cmap=cmap, levels=levels
+            )
+        return [out]
 
     def integrate(self, q):
         return sum(f.integrate(q[n]) for n, f in self.faces.items())
@@ -608,13 +646,19 @@ class DGCubedSphereFace:
 
         self.time += dt
 
-    def set_initial_condition(self, u, v, w, h):
+    def set_initial_condition(self, u, v, w, h, b=None):
 
         self.u = torch.from_numpy(u.astype(self.dtype)).to(self.device)
         self.v = torch.from_numpy(v.astype(self.dtype)).to(self.device)
         self.w = torch.from_numpy(w.astype(self.dtype)).to(self.device)
 
         self.h = torch.from_numpy(h.astype(self.dtype)).to(self.device)
+
+        if b is None:
+            self.b = torch.zeros_like(self.u).to(self.device)
+        else:
+            self.b = torch.from_numpy(b.astype(self.dtype)).to(self.device)
+
         self.vort = self.dg_vort(self.u, self.v, self.w, self.h)
 
         self.tmp1 = torch.zeros_like(self.u).to(self.device)
@@ -915,6 +959,9 @@ class DGCubedSphereFace:
         uv_flux = self.uv_flux(u, v, w, h)
         uv_flux_horz = 0.5 * (uv_right_flux + uv_left_flux) - self.a * (self.g / c_ho) * (h_right_flux - h_left_flux)
         uv_flux_vert = 0.5 * (uv_up_flux + uv_down_flux) - self.a * (self.g / c_ve) * (h_up_flux - h_down_flux)
+
+        if self.b is not None:
+            uv_flux += self.g * self.b
 
         velocity_perp = cross_product([self.kx, self.ky, self.kz], [u, v, w])
         u_perp, v_perp, _ = self.phys_to_cov(*velocity_perp)
