@@ -189,7 +189,7 @@ class DGCubedSphereSWE:
         else:
             raise ValueError(f"dim: expected one of 2, 3. Found {dim}.")
 
-    def triangular_plot(self, ax, vmin=None, vmax=None, plot_func=None, cmap='nipy_spectral', latlong=False, n=None, lines=False):
+    def triangular_plot(self, ax, vmin=None, vmax=None, plot_func=None, cmap='nipy_spectral', latlong=False, n=None, lines=False, levels=None):
         data = [plot_func(face).ravel() for face in self.faces.values()]
         if not latlong:
             x_coords = [face.xs.ravel() for face in self.faces.values()]
@@ -214,8 +214,9 @@ class DGCubedSphereSWE:
         if n is None:
             n = int(0.5 * (vmax - vmin) / 1e-5)
 
-        levels = np.linspace(vmin, vmax, n)
-        print('Num levels', n)
+        if levels is None:
+            levels = np.linspace(vmin, vmax, n)
+        print('Num levels', len(levels))
 
         if lines:
             out = ax.tricontour(
@@ -228,7 +229,7 @@ class DGCubedSphereSWE:
             )
         return [out]
 
-    def latlong_triangular_plot(self, ax, vmin=None, vmax=None, plot_func=None, cmap='nipy_spectral', n=None, lines=False):
+    def latlong_triangular_plot(self, ax, vmin=None, vmax=None, plot_func=None, cmap='nipy_spectral', n=None, lines=False, levels=None):
         data = [plot_func(face).ravel() for face in self.faces.values()]
 
         x_coords = [face.geometry.lat_long(face.xs, face.ys, face.zs)[1].ravel() for face in self.faces.values()]
@@ -246,14 +247,26 @@ class DGCubedSphereSWE:
         if n is None:
             n = int(0.5 * (vmax - vmin) / 1e-5)
 
-        levels = np.linspace(vmin, vmax, n)
-        print('Num levels', n)
+        if levels is None:
+            levels = np.linspace(vmin, vmax, n)
+        print('Num levels', len(levels))
 
         if lines:
             out = ax.tricontour(
                 x_coords[mask], y_coords[mask], data[mask], colors='black',
-                levels=levels, negative_linestyles='dashed', linewidths=0.5
+                levels=levels, negative_linestyles='dashed', linewidths=0.5, inline=True
             )
+            fntsz = 8
+            label_set = list(levels[::5])
+            if not levels[1] in label_set:
+                label_set.append(levels[1])
+            if not levels[-3] in label_set:
+                label_set.append(levels[-3])
+            print(label_set)
+            ax.clabel(out, label_set, inline=True, fontsize=fntsz)
+            # ax.clabel(out, out.levels[::5], inline=True, fontsize=fntsz)
+            # ax.clabel(out, out.levels[:1], inline=True, fontsize=fntsz)
+            # ax.clabel(out, out.levels[-1:], inline=True, fontsize=fntsz)
         else:
             out = ax.tricontourf(
                 x_coords[mask], y_coords[mask], data[mask], cmap=cmap, levels=levels
@@ -294,7 +307,9 @@ class DGCubedSphereSWE:
         for name in self.face_names:
             vars = ['u', 'v', 'w', 'h']
             data = [np.load(self.make_fp(vars[i], name, fn_template, directory)) for i in range(len(vars))]
+            b = self.faces[name].b
             self.faces[name].set_initial_condition(*data)
+            self.faces[name].b = b
 
         self.boundaries()
 

@@ -66,16 +66,14 @@ def plot_height(idx, label):
     ax.set_xlabel("Longitude (degrees)")
     ax.set_ylabel("Latitiude (degrees)")
 
-    vmin = min(f.h.min() for f in solver.faces.values())
-    vmax = max(f.h.max() for f in solver.faces.values())
+    vmin = 8000
+    vmax = 10600
     n = int((vmax - vmin) / 200)
-    im = solver.latlong_triangular_plot(ax, vmin=vmin, vmax=vmax, plot_func=lambda s: s.h, n=n)
+    levels = vmin + 200 * np.arange(n + 1)
+    im = solver.latlong_triangular_plot(ax, vmin=vmin, vmax=vmax, plot_func=lambda s: s.h, n=n, levels=levels)
     plt.colorbar(im[0])
 
-    vmin = 8200
-    vmax = 10400
-    n = int((vmax - vmin) / 200)
-    im = solver.latlong_triangular_plot(ax, vmin=vmin, vmax=vmax, plot_func=lambda s: s.h, n=n, lines=True)
+    im = solver.latlong_triangular_plot(ax, vmin=vmin, vmax=vmax, plot_func=lambda s: s.h, n=n, lines=True, levels=levels)
 
     print('h min max:', min(f.h.min() for f in solver.faces.values()), max(f.h.max() for f in solver.faces.values()))
 
@@ -95,19 +93,24 @@ for face in solver.faces.values():
 
 plot_height(1, 'ic')
 
-for i in range(14):
-    print('Running day', i)
-    tend = solver.time + 3600 * 24
-    print('h min max:', min(f.h.min() for f in solver.faces.values()), max(f.h.max() for f in solver.faces.values()), solver.get_dt())
-    while solver.time < tend:
-        dt = solver.get_dt()
-        dt = min(dt, tend - solver.time)
-        solver.time_step(dt=dt)
+mode = 'plot'
 
-    fn_template = f"williamson_6_day_{i + 1}.npy"
-    solver.save_restart(fn_template, 'data')
+if mode == 'run':
+    for i in range(14):
+        print('Running day', i)
+        tend = solver.time + 3600 * 24
+        print('h min max:', min(f.h.min() for f in solver.faces.values()), max(f.h.max() for f in solver.faces.values()), solver.get_dt())
+        while solver.time < tend:
+            dt = solver.get_dt()
+            dt = min(dt, tend - solver.time)
+            solver.time_step(dt=dt)
+
+        fn_template = f"williamson_6_day_{i + 1}.npy"
+        solver.save_restart(fn_template, 'data')
 
 
+fn_template = "williamson_6_day_14.npy"
+solver.load_restart(fn_template, 'data')
 plot_height(2, 'final')
 
 plt.show()

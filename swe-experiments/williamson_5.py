@@ -33,18 +33,16 @@ def initial_condition(face):
 
     R = np.pi / 9
     r = np.sqrt((long)**2 + (lat - np.pi / 6)**2)
-    print(r.min(), r.min() / R)
     b = 2_000.0 * (1 - r / R)
-    print(b.min(), b.max())
     b[b < 0.0] = 0.0
-    print(b.min(), b.max())
-    print()
+    # print('b min max:', b.min(), b.max())
+    # print()
 
     u = long_vec_x * u_
     v = long_vec_y * u_
     w = long_vec_z * u_
 
-    return u, v, w, h, b
+    return u, v, w, h - b, b
 
 
 def plot_height(idx, label):
@@ -52,20 +50,19 @@ def plot_height(idx, label):
     ax = fig.add_subplot(111)
     ax.set_xlabel("Longitude (degrees)")
     ax.set_ylabel("Latitiude (degrees)")
+    #
+    vmin = 5000
+    vmax = 6050
+    n = int((vmax - vmin) / 50)
+    levels = vmin + 50 * np.arange(n)
 
-    vmin = min(f.h.min() for f in solver.faces.values())
-    vmax = max(f.h.max() for f in solver.faces.values())
-    #n = int((vmax - vmin) / 200)
-    n = 100
-    im = solver.latlong_triangular_plot(ax, vmin=vmin, vmax=vmax, plot_func=lambda s: s.h, n=n)
+    im = solver.latlong_triangular_plot(ax, vmin=vmin, vmax=vmax, plot_func=lambda s: s.h + s.b, levels=levels)
     plt.colorbar(im[0])
+    im = solver.latlong_triangular_plot(ax, vmin=vmin, vmax=vmax, plot_func=lambda s: s.h + s.b, n=n, lines=True, levels=levels)
 
-    # vmin = 8200
-    # vmax = 10400
-    # n = int((vmax - vmin) / 200)
-    # im = solver.latlong_triangular_plot(ax, vmin=vmin, vmax=vmax, plot_func=lambda s: s.b, n=n, lines=True)
-
+    print('\nb min max:', min(f.b.min() for f in solver.faces.values()), max(f.b.max() for f in solver.faces.values()))
     print('h min max:', min(f.h.min() for f in solver.faces.values()), max(f.h.max() for f in solver.faces.values()))
+    print('h+b min max:', min((f.h + f.b).min() for f in solver.faces.values()), max((f.h + f.b).max() for f in solver.faces.values()))
 
     plt.savefig(f'./plots/williamson_5_{label}.png')
 
@@ -96,23 +93,28 @@ solver = DGCubedSphereSWE(
 for face in solver.faces.values():
     face.set_initial_condition(*initial_condition(face))
 
-
-plot_orography(1)
+# plot_orography(1)
 plot_height(2, 'ic')
+mode = 'plot'
+if mode == 'run':
+    plot_orography(1)
+    plot_height(2, 'ic')
+    for i in range(15):
+        print('\nRunning day', i)
+        tend = solver.time + 3600 * 24
+        print('h min max:', min(f.h.min() for f in solver.faces.values()), max(f.h.max() for f in solver.faces.values()), solver.get_dt())
+        while solver.time < tend:
+            dt = solver.get_dt()
+            dt = min(dt, tend - solver.time)
+            solver.time_step(dt=dt)
 
-for i in range(15):
-    print('\nRunning day', i)
-    tend = solver.time + 3600 * 24
-    print('h min max:', min(f.h.min() for f in solver.faces.values()), max(f.h.max() for f in solver.faces.values()), solver.get_dt())
-    while solver.time < tend:
-        dt = solver.get_dt()
-        dt = min(dt, tend - solver.time)
-        solver.time_step(dt=dt)
-
-    fn_template = f"williamson_5_day_{i + 1}.npy"
-    solver.save_restart(fn_template, 'data')
+        fn_template = f"williamson_5_day_{i + 1}.npy"
+        solver.save_restart(fn_template, 'data')
 
 
+
+fn_template = "williamson_5_day_15.npy"
+solver.load_restart(fn_template, 'data')
 plot_height(3, 'final')
 
 plt.show()
