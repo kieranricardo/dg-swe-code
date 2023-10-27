@@ -46,7 +46,7 @@ def initial_condition(face):
 
 
 def plot_height(idx, label):
-    fig = plt.figure(idx, figsize=(8, 4))
+    fig = plt.figure(idx, figsize=(8, 5))
     ax = fig.add_subplot(111)
     ax.set_xlabel("Longitude (degrees)")
     ax.set_ylabel("Latitiude (degrees)")

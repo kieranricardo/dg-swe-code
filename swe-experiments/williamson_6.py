@@ -57,11 +57,15 @@ def initial_condition(face):
     v = long_vec_y * u_ + lat_vec_y * v_
     w = long_vec_z * u_ + lat_vec_z * v_
 
+    angular_group_velocity = (R * (3 + R) * o - 2 * f)
+    angular_group_velocity /= (1 + R) * (2 + R)
+    angular_group_velocity *= (180 / np.pi) * 24 * 3600
+    print('Group velocity (degrees / day): ', angular_group_velocity)
     return u, v, w, h
 
 
 def plot_height(idx, label):
-    fig = plt.figure(idx, figsize=(8, 4))
+    fig = plt.figure(idx, figsize=(8, 5))
     ax = fig.add_subplot(111)
     ax.set_xlabel("Longitude (degrees)")
     ax.set_ylabel("Latitiude (degrees)")
