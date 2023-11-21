@@ -60,7 +60,6 @@ def initial_condition(face):
     angular_group_velocity = (R * (3 + R) * o - 2 * f)
     angular_group_velocity /= (1 + R) * (2 + R)
     angular_group_velocity *= (180 / np.pi) * 24 * 3600
-    print('Group velocity (degrees / day): ', angular_group_velocity)
     return u, v, w, h
 
 

@@ -972,8 +972,11 @@ class DGCubedSphereFace:
         #######
 
         uv_flux = self.uv_flux(u, v, w, h)
-        uv_flux_horz = 0.5 * (uv_right_flux + uv_left_flux) - self.a * (self.g / c_ho) * (h_right_flux - h_left_flux)
-        uv_flux_vert = 0.5 * (uv_up_flux + uv_down_flux) - self.a * (self.g / c_ve) * (h_up_flux - h_down_flux)
+
+        alpha = torch.maximum(c_right / self.h_right, c_left / self.h_left)
+        uv_flux_horz = 0.5 * (uv_right_flux + uv_left_flux) - self.a * (h_right_flux - h_left_flux) * alpha #(self.g / c_ho)
+        alpha = torch.maximum(c_up / self.h_up, c_down / self.h_down)
+        uv_flux_vert = 0.5 * (uv_up_flux + uv_down_flux) - self.a * (h_up_flux - h_down_flux) * alpha #(self.g / c_ve) * (h_up_flux - h_down_flux)
 
         if self.b is not None:
             uv_flux += self.g * self.b

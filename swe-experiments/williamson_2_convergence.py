@@ -55,7 +55,7 @@ solver = DGCubedSphereSWE(
 for face in solver.faces.values():
     face.set_initial_condition(*initial_condition(face))
 
-fig = plt.figure()
+fig = plt.figure(1)
 ax = fig.add_subplot(111)
 ax.set_xlabel("x (km)")
 ax.set_ylabel("y (km)")
@@ -115,7 +115,7 @@ for exp, a in zip(exps, coeffs):
     r, *_ = linregress(np.log(grid_spacing), np.log(np.array(vel_errors)))
     print('vel convergence:', r)
 
-    plt.figure(1)
+    plt.figure(2)
     plt.ylabel("Relative L2 error")
     plt.xlabel(r"Resolution (degrees)")
     plt.loglog(grid_spacing, h_errors, '--o', label=f"D {exp}")

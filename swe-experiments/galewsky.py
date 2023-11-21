@@ -123,7 +123,7 @@ elif mode == 'plot':
     interpolator = Interpolate(3, p)
 
     exp_names = [f'DG_res_6x{nx}x{ny}', f'DG_cntr_res_6x{nx}x{ny}']
-    labels = ['Cons.', 'Diss.']
+    labels = ['Diss.', 'Cons.']
 
     for exp, label in zip(exp_names, labels):
         fn_template = f"{exp}_day_{20}.npy"
