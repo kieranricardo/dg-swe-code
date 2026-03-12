@@ -216,7 +216,6 @@ class DGCubedSphereSWE:
 
         if levels is None:
             levels = np.linspace(vmin, vmax, n)
-        print('Num levels', len(levels))
 
         if lines:
             out = ax.tricontour(
@@ -244,12 +243,12 @@ class DGCubedSphereSWE:
         # mask = (10 <= y_coords) & (y_coords <= 80)
         mask = np.ones_like(x_coords) > 0
 
-        if n is None:
-            n = int(0.5 * (vmax - vmin) / 1e-5)
 
         if levels is None:
+            if n is None:
+                n = int(0.5 * (vmax - vmin) / 1e-5)
+
             levels = np.linspace(vmin, vmax, n)
-        print('Num levels', len(levels))
 
         if lines:
             out = ax.tricontour(
@@ -262,7 +261,7 @@ class DGCubedSphereSWE:
                 label_set.append(levels[1])
             if not levels[-3] in label_set:
                 label_set.append(levels[-3])
-            print(label_set)
+
             ax.clabel(out, label_set, inline=True, fontsize=fntsz)
             # ax.clabel(out, out.levels[::5], inline=True, fontsize=fntsz)
             # ax.clabel(out, out.levels[:1], inline=True, fontsize=fntsz)
