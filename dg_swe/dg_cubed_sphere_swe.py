@@ -1013,6 +1013,9 @@ class DGCubedSphereFace:
         u_perp_left = vel_p_left[0] * self.dxdxi_left + vel_p_left[1] * self.dydxi_left + vel_p_left[2] * self.dzdxi_left
         v_perp_left = vel_p_left[0] * self.dxdeta_left + vel_p_left[1] * self.dydeta_left + vel_p_left[2] * self.dzdeta_left
 
+        c_adv_vert = abs(h_flux_vert) / (0.5 * (self.h_up + self.h_down))
+        c_adv_horz = abs(h_flux_horz) / (0.5 * (self.h_left + self.h_right))
+
         # handle u
         #######
         ###
@@ -1020,17 +1023,23 @@ class DGCubedSphereFace:
         u_k = -torch.einsum('fgcd,abcd->fgab', uv_flux, self.ddxi)
         u_k -= vort * u_perp
 
+        wx = self.weights_x.ravel()[-1]
         self.tmp1[:, :, -1] = 0
         self.tmp1[:, :, 0] = 0
         self.tmp2[:, :, :, -1] = (uv_flux_horz - uv_left_flux)[:, 1:]
         self.tmp2[:, :, :, 0] = -(uv_flux_horz - uv_right_flux)[:, :-1]
 
-        self.tmp1[:, :, -1] += -0.5 * (u_perp_down * (u_cov_up - u_cov_down))[1:] * (1 / self.J)[:, :, -1]
-        self.tmp1[:, :, 0] += -0.5 * (u_perp_up * (u_cov_up - u_cov_down))[:-1] * (1 / self.J)[:, :, 0]
-        self.tmp2[:, :, :, -1] += 0.5 * (u_perp_left * (v_cov_right - v_cov_left))[:, 1:] * (1 / self.J)[..., -1]
-        self.tmp2[:, :, :, 0] += 0.5 * (u_perp_right * (v_cov_right - v_cov_left))[:, :-1] * (1 / self.J)[..., 0]
+        u_k[:, :, :, -1] -= (uv_flux_horz - uv_left_flux)[:, 1:] / wx
+        u_k[:, :, :, 0] -= -(uv_flux_horz - uv_right_flux)[:, :-1] / wx
 
-        u_k -= (self.tmp1 + self.tmp2) / self.weights_x.ravel()[-1]
+        u_k[:, :, -1] -= -0.5 * (u_perp_down * (u_cov_up - u_cov_down))[1:] * (1 / self.J)[:, :, -1] / wx
+        u_k[:, :, 0] -= -0.5 * (u_perp_up * (u_cov_up - u_cov_down))[:-1] * (1 / self.J)[:, :, 0] / wx
+        u_k[:, :, :, -1] -= 0.5 * (u_perp_left * (v_cov_right - v_cov_left))[:, 1:] * (1 / self.J)[..., -1] / wx
+        u_k[:, :, :, 0] -= 0.5 * (u_perp_right * (v_cov_right - v_cov_left))[:, :-1] * (1 / self.J)[..., 0] / wx
+
+        # diss = -self.a * c_adv_vert * (u_cov_up - u_cov_down)
+        # u_k[:, :, -1] -= diss[1:] * self.J_eta[:, :, -1] / wx
+        # u_k[:, :, 0] += diss[:-1] * self.J_eta[:, :, -1] / wx
 
         # handle v
         #######
@@ -1039,17 +1048,17 @@ class DGCubedSphereFace:
         v_k = -torch.einsum('fgcd,abcd->fgab', uv_flux, self.ddeta)
         v_k -= vort * v_perp
 
-        self.tmp1[:, :, -1] = (uv_flux_vert - uv_down_flux)[1:]
-        self.tmp1[:, :, 0] = -(uv_flux_vert - uv_up_flux)[:-1]
-        self.tmp2[:, :, :, -1] = 0
-        self.tmp2[:, :, :, 0] = 0
+        v_k[:, :, -1] -= (uv_flux_vert - uv_down_flux)[1:] / wx
+        v_k[:, :, 0] -= -(uv_flux_vert - uv_up_flux)[:-1] / wx
 
-        self.tmp1[:, :, -1] += -0.5 * (v_perp_down * (u_cov_up - u_cov_down))[1:] * (1 / self.J)[:, :, -1]
-        self.tmp1[:, :, 0] += -0.5 * (v_perp_up * (u_cov_up - u_cov_down))[:-1] * (1 / self.J)[:, :, 0]
-        self.tmp2[:, :, :, -1] += 0.5 * (v_perp_left * (v_cov_right - v_cov_left))[:, 1:] * (1 / self.J)[..., -1]
-        self.tmp2[:, :, :, 0] += 0.5 * (v_perp_right * (v_cov_right - v_cov_left))[:, :-1] * (1 / self.J)[..., 0]
+        v_k[:, :, -1] -= -0.5 * (v_perp_down * (u_cov_up - u_cov_down))[1:] * (1 / self.J)[:, :, -1] / wx
+        v_k[:, :, 0] -= -0.5 * (v_perp_up * (u_cov_up - u_cov_down))[:-1] * (1 / self.J)[:, :, 0] / wx
+        v_k[:, :, :, -1] -= 0.5 * (v_perp_left * (v_cov_right - v_cov_left))[:, 1:] * (1 / self.J)[..., -1] / wx
+        v_k[:, :, :, 0] -= 0.5 * (v_perp_right * (v_cov_right - v_cov_left))[:, :-1] * (1 / self.J)[..., 0] / wx
 
-        v_k -= (self.tmp1 + self.tmp2) / self.weights_x.ravel()[-1]
+        # diss = -self.a * c_adv_vert * (v_cov_right - v_cov_left)
+        # v_k[:, :, :, -1] -= diss[:, 1:] * self.J_xi[:, :, :, -1] / wx
+        # v_k[:, :, :, 0] += diss[:, -1] * self.J_xi[:, :, :, -1] / wx
 
         u_k, v_k, w_k = self.cov_to_phys(u_k, v_k, 0)
 

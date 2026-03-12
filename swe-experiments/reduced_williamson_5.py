@@ -3,6 +3,7 @@ import numpy as np
 from scipy.stats import linregress
 from dg_swe.dg_cubed_sphere_swe import DGCubedSphereSWE
 import os
+import time
 
 if not os.path.exists('./plots'): os.makedirs('./plots')
 if not os.path.exists('./data'): os.makedirs('./data')
@@ -100,10 +101,10 @@ print('Initial dt:', solver.get_dt())
 # exit(0)
 
 # plot_orography(1)
-mode = 'restart'
+mode = 'run'
 i_start = 40
 if mode == 'run':
-
+    t0 = time.time()
     for i in range(20):
         print('\nRunning day', i)
         tend = solver.time + 3600 * 24
@@ -115,6 +116,8 @@ if mode == 'run':
 
         fn_template = f"reduced_williamson_5_day_{i + 1}.npy"
         solver.save_restart(fn_template, 'data')
+    t1 = time.time()
+    print('Wall time for 1 day:', (t1 - t0) / 20)
 
 if mode == 'restart':
 
