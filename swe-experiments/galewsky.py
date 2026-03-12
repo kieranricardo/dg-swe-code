@@ -10,7 +10,7 @@ if not os.path.exists('./data'): os.makedirs('./data')
 
 plt.rcParams['font.size'] = '12'
 
-mode = 'run'
+mode = 'plot'
 dev = 'cpu'
 
 nx = ny = 15
@@ -69,7 +69,7 @@ def initial_condition(face):
 
 if mode == 'run':
 
-    exp_names = [f'DG_res_6x{nx}x{ny}', f'DG_cntr_res_6x{nx}x{ny}']
+    exp_names = [f'DG_res_6x{nx}x{ny}', f'DG_cntr_res_6x{nx}x{ny}'][:1]
 
     for exp in exp_names:
         if 'cntr' in exp:
@@ -89,7 +89,7 @@ if mode == 'run':
         print('Starting', exp)
         print('a:', solver.faces['zp'].a, 'res:', nx, ny)
 
-        for i in range(20):
+        for i in range(10):
             print('Running day', i)
             tend = solver.time + 3600 * 24
             while solver.time < tend:
@@ -122,14 +122,14 @@ elif mode == 'plot':
 
     interpolator = Interpolate(3, p)
 
-    exp_names = [f'DG_res_6x{nx}x{ny}', f'DG_cntr_res_6x{nx}x{ny}']
-    labels = ['Diss.', 'Cons.']
-
-    for exp, label in zip(exp_names, labels):
-        fn_template = f"{exp}_day_{20}.npy"
-        solver.plot_diagnostics(fn_template, 'data', 1, label)
-
-    plt.savefig(f'./plots/galewsky_conservation.png')
+    exp_names = [f'DG_res_6x{nx}x{ny}', f'DG_cntr_res_6x{nx}x{ny}'][:1]
+    # labels = ['Diss.', 'Cons.']
+    #
+    # for exp, label in zip(exp_names, labels):
+    #     fn_template = f"{exp}_day_{20}.npy"
+    #     solver.plot_diagnostics(fn_template, 'data', 1, label)
+    #
+    # plt.savefig(f'./plots/galewsky_conservation.png')
 
     vmin = -0.00015; vmax = 0.00015
     plot_func = lambda s: s.vorticity() - s.f
@@ -162,6 +162,6 @@ elif mode == 'plot':
 
         im = solver_hr.triangular_plot(ax, vmin=vmin, vmax=vmax, latlong=False, plot_func=interpolate_plot_func)
         plt.colorbar(im[0])
-        plt.savefig(f'./plots/vort_galewsky_{exp}_{int(day)}_days.png')
+        # plt.savefig(f'./plots/vort_galewsky_{exp}_{int(day)}_days.png')
 
     plt.show()

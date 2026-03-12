@@ -1,5 +1,5 @@
 from matplotlib import pyplot as plt
-# from dg_swe.linear_cubed_sphere_swe import LinearCubedSphereSWE
+from dg_swe.dg_cubed_sphere_linear_swe import DGCubedSphereLinearSWE
 import numpy as np
 import torch
 import os
@@ -31,34 +31,34 @@ def initial_condition(face):
     return u.numpy(), v.numpy(), w.numpy(), h.numpy()
 
 
-from dg_swe.dg_cubed_sphere_swe import DGCubedSphereSWE
-solver = DGCubedSphereSWE(
-    poly_order, nx, ny, g, f,
-    eps, device=dev, solution=None, a=0.5, radius=1,
-    dtype=np.float64, damping=None
-)
+# from dg_swe.dg_cubed_sphere_swe import DGCubedSphereSWE
+# solver = DGCubedSphereSWE(
+#     poly_order, nx, ny, g, f,
+#     eps, device=dev, solution=None, a=0.5, radius=1,
+#     dtype=np.float64, damping=None
+# )
+#
+# for face in solver.faces.values():
+#     face.set_initial_condition(*initial_condition(face))
+#
+# fig = plt.figure()
+# ax = fig.add_subplot(111)
+# ax.set_xlabel("x (km)")
+# ax.set_ylabel("y (km)")
+#
+# vmin = min(f.h.min() for f in solver.faces.values())
+# vmax = max(f.h.max() for f in solver.faces.values())
+# im = solver.triangular_plot(ax, latlong=False, vmin=vmin, vmax=vmax, plot_func=lambda s: s.h, n=20)
+# plt.colorbar(im[0])
+# plt.savefig('./plots/geostrophic_balance_ic.png')
 
-for face in solver.faces.values():
-    face.set_initial_condition(*initial_condition(face))
-
-fig = plt.figure()
-ax = fig.add_subplot(111)
-ax.set_xlabel("x (km)")
-ax.set_ylabel("y (km)")
-
-vmin = min(f.h.min() for f in solver.faces.values())
-vmax = max(f.h.max() for f in solver.faces.values())
-im = solver.triangular_plot(ax, latlong=False, vmin=vmin, vmax=vmax, plot_func=lambda s: s.h, n=20)
-plt.colorbar(im[0])
-plt.savefig('./plots/geostrophic_balance_ic.png')
-
-solver = LinearCubedSphereSWE(
+solver = DGCubedSphereLinearSWE(
     poly_order, nx, ny, g, f,
     eps, H=H, device=dev, solution=None, a=0.5, radius=1,
     dtype=np.float64, damping=None,
 )
 
-solver0 = LinearCubedSphereSWE(
+solver0 = DGCubedSphereLinearSWE(
     poly_order, nx, ny, g, f,
     eps, H=H, device=dev, solution=None, a=0.5, radius=1,
     dtype=np.float64, damping=None
@@ -78,7 +78,7 @@ h_errors = []
 vel_errors = []
 times = []
 
-for _ in range(1000):
+for _ in range(100):
 
     h_error = sum(f1.integrate((f1.h - f2.h) ** 2) for f1, f2 in zip(solver.faces.values(), solver0.faces.values()))
     h_error = np.sqrt(h_error) / h_norm
@@ -101,5 +101,5 @@ plt.semilogy(times, h_errors, label='D')
 plt.semilogy(times, vel_errors, label='u')
 plt.legend()
 plt.grid()
-plt.savefig('./plots/linear_geostrophic_balance_error.png')
+# plt.savefig('./plots/linear_geostrophic_balance_error.png')
 plt.show()
