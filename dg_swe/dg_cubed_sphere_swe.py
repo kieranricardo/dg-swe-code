@@ -519,6 +519,14 @@ class DGCubedSphereFace:
         self.dydxi_up, self.dydxi_down = self.make_up_down_arrays(self.dydxi)
         self.dzdxi_up, self.dzdxi_down = self.make_up_down_arrays(self.dzdxi)
 
+        self.dxdxi_right, self.dxdxi_left = self.make_left_right_arrays(self.dxdxi)
+        self.dydxi_right, self.dydxi_left = self.make_left_right_arrays(self.dydxi)
+        self.dzdxi_right, self.dzdxi_left = self.make_left_right_arrays(self.dzdxi)
+
+        self.dxdeta_up, self.dxdeta_down = self.make_up_down_arrays(self.dxdeta)
+        self.dydeta_up, self.dydeta_down = self.make_up_down_arrays(self.dydeta)
+        self.dzdeta_up, self.dzdeta_down = self.make_up_down_arrays(self.dzdeta)
+
         self.dxdeta_right, self.dxdeta_left = self.make_left_right_arrays(self.dxdeta)
         self.dydeta_right, self.dydeta_left = self.make_left_right_arrays(self.dydeta)
         self.dzdeta_right, self.dzdeta_left = self.make_left_right_arrays(self.dzdeta)
@@ -947,15 +955,28 @@ class DGCubedSphereFace:
         uv_left_flux = self.uv_flux(self.u_left, self.v_left, self.w_left, self.h_left)
 
         # upper boundary
-        c_up = self.wave_speed(self.u_up, self.v_up, self.w_up, self.h_up)
-        c_down = self.wave_speed(self.u_down, self.v_down, self.w_down, self.h_down)
-        c_ve = 0.5 * (c_up + c_down)
-        c_right = self.wave_speed(self.u_right, self.v_right, self.w_right, self.h_right)
-        c_left = self.wave_speed(self.u_left, self.v_left, self.w_left, self.h_left)
-        c_ho = 0.5 * (c_right + c_left)
+        # c_up = self.wave_speed(self.u_up, self.v_up, self.w_up, self.h_up)
+        # c_down = self.wave_speed(self.u_down, self.v_down, self.w_down, self.h_down)
+        # c_ve = 0.5 * (c_up + c_down)
+        # c_right = self.wave_speed(self.u_right, self.v_right, self.w_right, self.h_right)
+        # c_left = self.wave_speed(self.u_left, self.v_left, self.w_left, self.h_left)
+        # c_ho = 0.5 * (c_right + c_left)
 
-        h_flux_vert = 0.5 * (h_up_flux + h_down_flux)
-        h_flux_horz = 0.5 * (h_right_flux + h_left_flux)
+        vel_up = h_up_flux / self.h_up
+        vel_down = h_down_flux / self.h_down
+        vel_right = h_right_flux / self.h_right
+        vel_left = h_left_flux / self.h_left
+
+        c_adv_vert = 0.5 * abs(vel_up + vel_down)
+        c_adv_horz = 0.5 * abs(vel_right + vel_left)
+
+        c_snd_ho = 0.5 * (np.sqrt(self.g * self.h_right) + np.sqrt(self.g * self.h_left))
+        c_snd_ve = 0.5 * (np.sqrt(self.g * self.h_up) + np.sqrt(self.g * self.h_down))
+        c_ho = c_adv_horz + c_snd_ho
+        c_ve = c_adv_vert + c_snd_ve
+
+        h_flux_vert = 0.5 * (h_up_flux + h_down_flux) #- self.a * c_snd_ve * (self.h_up - self.h_down)
+        h_flux_horz = 0.5 * (h_right_flux + h_left_flux) #- self.a * c_snd_ho * (self.h_right - self.h_left)
 
         self.tmp1[:, :, -1] = (h_flux_vert[1:] - h_down_flux[1:]) * (self.weights_x * self.J_vertface[:, :, -1])
         self.tmp1[:, :, 0] = -(h_flux_vert[:-1] - h_up_flux[:-1]) * (self.weights_x * self.J_vertface[:, :, 0])
@@ -972,10 +993,13 @@ class DGCubedSphereFace:
 
         uv_flux = self.uv_flux(u, v, w, h)
 
-        alpha = torch.maximum(c_right / self.h_right, c_left / self.h_left)
-        uv_flux_horz = 0.5 * (uv_right_flux + uv_left_flux) - self.a * (h_right_flux - h_left_flux) * alpha #(self.g / c_ho)
-        alpha = torch.maximum(c_up / self.h_up, c_down / self.h_down)
-        uv_flux_vert = 0.5 * (uv_up_flux + uv_down_flux) - self.a * (h_up_flux - h_down_flux) * alpha #(self.g / c_ve) * (h_up_flux - h_down_flux)
+        # alpha = torch.maximum(c_right / self.h_right, c_left / self.h_left)
+        # uv_flux_horz = 0.5 * (uv_right_flux + uv_left_flux) - self.a * (h_right_flux - h_left_flux) * alpha #(self.g / c_ho)
+        # alpha = torch.maximum(c_up / self.h_up, c_down / self.h_down)
+        # uv_flux_vert = 0.5 * (uv_up_flux + uv_down_flux) - self.a * (h_up_flux - h_down_flux) * alpha #(self.g / c_ve) * (h_up_flux - h_down_flux)
+
+        uv_flux_horz = 0.5 * (uv_right_flux + uv_left_flux) - self.a * c_snd_ho * (vel_right - vel_left)
+        uv_flux_vert = 0.5 * (uv_up_flux + uv_down_flux) - self.a * c_snd_ve * (vel_up - vel_down)
 
         if self.b is not None:
             uv_flux += self.g * self.b
@@ -993,7 +1017,11 @@ class DGCubedSphereFace:
         #
         u_cov_up = self.u_up * self.dxdxi_up + self.v_up * self.dydxi_up + self.w_up * self.dzdxi_up
         u_cov_down = self.u_down * self.dxdxi_down + self.v_down * self.dydxi_down + self.w_down * self.dzdxi_down
+        u_cov_right = self.u_right * self.dxdxi_right + self.v_right * self.dydxi_right + self.w_right * self.dzdxi_right
+        u_cov_left = self.u_left * self.dxdxi_left + self.v_left * self.dydxi_left + self.w_left * self.dzdxi_left
 
+        v_cov_up = self.u_up * self.dxdeta_up + self.v_up * self.dydeta_up + self.w_up * self.dzdeta_up
+        v_cov_down = self.u_down * self.dxdeta_down + self.v_down * self.dydeta_down + self.w_down * self.dzdeta_down
         v_cov_right = self.u_right * self.dxdeta_right + self.v_right * self.dydeta_right + self.w_right * self.dzdeta_right
         v_cov_left = self.u_left * self.dxdeta_left + self.v_left * self.dydeta_left + self.w_left * self.dzdeta_left
 
@@ -1013,9 +1041,6 @@ class DGCubedSphereFace:
         u_perp_left = vel_p_left[0] * self.dxdxi_left + vel_p_left[1] * self.dydxi_left + vel_p_left[2] * self.dzdxi_left
         v_perp_left = vel_p_left[0] * self.dxdeta_left + vel_p_left[1] * self.dydeta_left + vel_p_left[2] * self.dzdeta_left
 
-        c_adv_vert = abs(h_flux_vert) / (0.5 * (self.h_up + self.h_down))
-        c_adv_horz = abs(h_flux_horz) / (0.5 * (self.h_left + self.h_right))
-
         # handle u
         #######
         ###
@@ -1024,10 +1049,6 @@ class DGCubedSphereFace:
         u_k -= vort * u_perp
 
         wx = self.weights_x.ravel()[-1]
-        self.tmp1[:, :, -1] = 0
-        self.tmp1[:, :, 0] = 0
-        self.tmp2[:, :, :, -1] = (uv_flux_horz - uv_left_flux)[:, 1:]
-        self.tmp2[:, :, :, 0] = -(uv_flux_horz - uv_right_flux)[:, :-1]
 
         u_k[:, :, :, -1] -= (uv_flux_horz - uv_left_flux)[:, 1:] / wx
         u_k[:, :, :, 0] -= -(uv_flux_horz - uv_right_flux)[:, :-1] / wx
@@ -1039,7 +1060,15 @@ class DGCubedSphereFace:
 
         # diss = -self.a * c_adv_vert * (u_cov_up - u_cov_down)
         # u_k[:, :, -1] -= diss[1:] * self.J_eta[:, :, -1] / wx
-        # u_k[:, :, 0] += diss[:-1] * self.J_eta[:, :, -1] / wx
+        # u_k[:, :, 0] += diss[:-1] * self.J_eta[:, :, 0] / wx
+        #
+        # diss = -self.a * c_adv_horz * (u_cov_right - u_cov_left)
+        # u_k[:, :, :, -1] -= diss[:, 1:] * self.J_xi[:, :, :, -1] / wx
+        # u_k[:, :, :, 0] += diss[:, -1] * self.J_xi[:, :, :, 0] / wx
+        #
+        # diss = self.a * c_adv_horz * (vel_right - vel_left)
+        # u_k[:, :, :, -1] -= diss[:, 1:] / wx
+        # u_k[:, :, :, 0] += diss[:, -1] / wx
 
         # handle v
         #######
@@ -1056,9 +1085,18 @@ class DGCubedSphereFace:
         v_k[:, :, :, -1] -= 0.5 * (v_perp_left * (v_cov_right - v_cov_left))[:, 1:] * (1 / self.J)[..., -1] / wx
         v_k[:, :, :, 0] -= 0.5 * (v_perp_right * (v_cov_right - v_cov_left))[:, :-1] * (1 / self.J)[..., 0] / wx
 
-        # diss = -self.a * c_adv_vert * (v_cov_right - v_cov_left)
+        # diss = -self.a * c_adv_vert * (v_cov_up - v_cov_down)
+        # v_k[:, :, -1] -= diss[1:] * self.J_eta[:, :, -1] / wx
+        # v_k[:, :, 0] += diss[:-1] * self.J_eta[:, :, 0] / wx
+        #
+        # diss = self.a * c_adv_vert * (vel_up - vel_down)
+        # v_k[:, :, -1] -= diss[1:] / wx
+        # v_k[:, :, 0] += diss[:-1] / wx
+        #
+        # diss = -self.a * c_adv_horz * (v_cov_right - v_cov_left)
         # v_k[:, :, :, -1] -= diss[:, 1:] * self.J_xi[:, :, :, -1] / wx
-        # v_k[:, :, :, 0] += diss[:, -1] * self.J_xi[:, :, :, -1] / wx
+        # v_k[:, :, :, 0] += diss[:, -1] * self.J_xi[:, :, :, 0] / wx
+
 
         u_k, v_k, w_k = self.cov_to_phys(u_k, v_k, 0)
 
