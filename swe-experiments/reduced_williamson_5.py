@@ -10,8 +10,8 @@ if not os.path.exists('./data'): os.makedirs('./data')
 
 plt.rcParams['font.size'] = '12'
 
-mode = 'run'
-i_start = 40
+mode = 'restart'
+i_start = 1400
 dev = 'cpu'
 
 eps = 0.8 * 2
@@ -147,7 +147,7 @@ print('Initial dt:', solver.get_dt())
 
 if mode == 'run':
     t0 = time.time()
-    for i in range(100):
+    for i in range(4000):
         print('\nRunning day', i + 1)
         tend = solver.time + 3600 * 24
         print('h min max:', min(f.h.min() for f in solver.faces.values()), max(f.h.max() for f in solver.faces.values()), solver.get_dt())
@@ -173,7 +173,7 @@ if mode == 'restart':
     print('Loading:', fn_template)
     solver.load_restart(fn_template, 'data')
 
-    for i in range(i_start, i_start + 60):
+    for i in range(i_start, i_start + 20):
         print('\nRunning day', i + 1)
         tend = solver.time + 3600 * 24
         print('h min max:', min(f.h.min() for f in solver.faces.values()), max(f.h.max() for f in solver.faces.values()), solver.get_dt())
@@ -186,7 +186,7 @@ if mode == 'restart':
             dt = min(dt, tend - solver.time)
             solver.time_step(dt=dt, order=34)
 
-        if ((i + 1) % 20 == 0):
+        if ((i + 1) % 1 == 0):
             fn_template = get_fn_template(i + 1, tangent_diss)
             print('Saving:', fn_template)
             solver.save_restart(fn_template, 'data')
@@ -202,19 +202,20 @@ pv_plot_func = lambda s: (s.vorticity() - s.f) / (s.h)
 
 #days = np.array([1, 2, 3, 4]) * 360
 # days = list(days) + [1800,]
-days = [100,]
+days = [1410,]
 for i, day in enumerate(days):
 # for i, day in enumerate([360, 400, 700]):
     fn_template = fn_template = get_fn_template(day, tangent_diss=True)
     solver.load_restart(fn_template, 'data')
+    print(min(f.h.min() for f in solver.faces.values()))
     # plot_data(2 * i + 1, f'vort_day_{day}_nx{nx}_p{poly_order}', vort_plot_func, vmin=-3e-5, vmax=3e-5)
     plot_data(2 * i + 1, f'vort_day_{day}_nx{nx}_p{poly_order}', vort_plot_func)
     # plot_data(2 * i + 1, f'pv_day_{day}_nx{nx}_p{poly_order}', pv_plot_func)
     plot_data(2 * i + 2, f'height_day_{day}_nx{nx}_p{poly_order}', h_plot_func)
 
-    # fn_template = fn_template = get_fn_template(day, tangent_diss=True)
+    # fn_template = fn_template = get_fn_template(day, tangent_diss=False)
     # solver.load_restart(fn_template, 'data')
-    # plot_data(2 * i + 3, f'vort_day_{day}_nx{nx}_p{poly_order}_tangent_diss', vort_plot_func, vmin=-3e-5, vmax=3e-5)
+    # plot_data(2 * i + 3, f'vort_day_{day}_nx{nx}_p{poly_order}_tangent_diss', vort_plot_func)
     # # plot_data(2 * i + 1, f'pv_day_{day}_nx{nx}_p{poly_order}', pv_plot_func)
     # plot_data(2 * i + 4, f'height_day_{day}_nx{nx}_p{poly_order}_tangent_diss', h_plot_func)
 

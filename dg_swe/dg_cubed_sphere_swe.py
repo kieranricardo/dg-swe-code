@@ -117,6 +117,34 @@ class DGCubedSphereSWE:
     def get_dt(self):
         return min(face.get_dt() for face in self.faces.values())
 
+    def positivity_preserving_limiter(self, state):
+
+        for n in self.face_names:
+            # if state[n][3].min() < 0:
+                # print('0 detected')
+
+            cell_means = (state[n][3] * self.faces[n].weights[None, None] * self.faces[n].J).sum(axis=(2, 3)) / (self.faces[n].weights[None, None] * self.faces[n].J).sum(axis=(2, 3))
+            cell_diffs = state[n][3] - cell_means[..., None, None]
+
+            cell_mins = state[n][3].amin(dim=(2, 3))
+            diff_min = cell_mins - cell_means
+
+            new_min = np.maximum(5 + 0 * cell_mins, cell_mins)
+            scale = (new_min - cell_means) / diff_min
+
+            # scale = (cell_mins > 5.0)
+
+            state[n][3][:] = cell_means[..., None, None] + scale[..., None, None] * cell_diffs
+
+            if cell_means.min() > 0:
+                pass
+                #print('Fixable')
+            else:
+                print("Unfixable")
+
+        return state
+
+
     def time_step(self, dt=None, order=3, forcing=None):
         self.time_list.append(self.time)
         self.energy_list.append(self.integrate(self.entropy()))
@@ -135,10 +163,12 @@ class DGCubedSphereSWE:
             k_1 = {n: self.faces[n].solve(*u[n], self.time, dt) for n in self.face_names}
 
             u_1 = {n: tuple(u[n][i] + dt * k_1[n][i] for i in range(4)) for n in self.face_names}
+            u_1 = self.positivity_preserving_limiter(u_1)
             self.boundaries(u_1)
             k_2 = {n: self.faces[n].solve(*u_1[n], self.time, dt) for n in self.face_names}
 
             u_2 = {n: tuple(0.75 * u[n][i] + 0.25 * (u_1[n][i] + dt * k_2[n][i]) for i in range(4)) for n in self.face_names}
+            u_2 = self.positivity_preserving_limiter(u_2)
             self.boundaries(u_2)
             k_3 = {n: self.faces[n].solve(*u_2[n], self.time, dt) for n in self.face_names}
 
@@ -149,6 +179,7 @@ class DGCubedSphereSWE:
                 self.faces[n].h = (self.faces[n].h + 2 * (u_2[n][3] + dt * k_3[n][3])) / 3
 
             u = {n: (self.faces[n].u, self.faces[n].v, self.faces[n].w, self.faces[n].h) for n in self.face_names}
+            u = self.positivity_preserving_limiter(u)
             self.boundaries(u)
 
         elif order == 34:
@@ -157,14 +188,17 @@ class DGCubedSphereSWE:
             k_1 = {n: self.faces[n].solve(*u[n], self.time, dt) for n in self.face_names}
 
             u_1 = {n: tuple(u[n][i] + 0.5 * dt * k_1[n][i] for i in range(4)) for n in self.face_names}
+            u_1 = self.positivity_preserving_limiter(u_1)
             self.boundaries(u_1)
             k_2 = {n: self.faces[n].solve(*u_1[n], self.time, dt) for n in self.face_names}
 
             u_2 = {n: tuple(u_1[n][i] + 0.5 * dt * k_2[n][i] for i in range(4)) for n in self.face_names}
+            u_2 = self.positivity_preserving_limiter(u_2)
             self.boundaries(u_2)
             k_3 = {n: self.faces[n].solve(*u_2[n], self.time, dt) for n in self.face_names}
 
             u_3 = {n: tuple((2 / 3) * u[n][i] + (1 / 3) * u_2[n][i] + (1 / 6) * dt * k_3[n][i] for i in range(4)) for n in self.face_names}
+            u_3 = self.positivity_preserving_limiter(u_3)
             self.boundaries(u_3)
             k_4 = {n: self.faces[n].solve(*u_3[n], self.time, dt) for n in self.face_names}
 
@@ -175,6 +209,7 @@ class DGCubedSphereSWE:
                 self.faces[n].h = u_3[n][3] + 0.5 * dt * k_4[n][3]
 
             u = {n: (self.faces[n].u, self.faces[n].v, self.faces[n].w, self.faces[n].h) for n in self.face_names}
+            u = self.positivity_preserving_limiter(u)
             self.boundaries(u)
 
         for n in self.face_names:
