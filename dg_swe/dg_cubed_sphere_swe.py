@@ -268,7 +268,7 @@ class DGCubedSphereSWE:
             # ax.clabel(out, out.levels[-1:], inline=True, fontsize=fntsz)
         else:
             out = ax.tricontourf(
-                x_coords[mask], y_coords[mask], data[mask], cmap=cmap, levels=levels
+                x_coords[mask], y_coords[mask], data[mask], cmap=cmap, levels=levels, vmin=vmin, vmax=vmax,
             )
         return [out]
 
@@ -975,6 +975,9 @@ class DGCubedSphereFace:
         c_ho = c_adv_horz + c_snd_ho
         c_ve = c_adv_vert + c_snd_ve
 
+        h_ve = 0.5 * (self.h_up + self.h_down)
+        h_ho = 0.5 * (self.h_right + self.h_left)
+
         h_flux_vert = 0.5 * (h_up_flux + h_down_flux) #- self.a * c_snd_ve * (self.h_up - self.h_down)
         h_flux_horz = 0.5 * (h_right_flux + h_left_flux) #- self.a * c_snd_ho * (self.h_right - self.h_left)
 
@@ -993,13 +996,13 @@ class DGCubedSphereFace:
 
         uv_flux = self.uv_flux(u, v, w, h)
 
-        # alpha = torch.maximum(c_right / self.h_right, c_left / self.h_left)
+        # alpha = torch.maximum(c_ho / self.h_right, c_ho / self.h_left)
         # uv_flux_horz = 0.5 * (uv_right_flux + uv_left_flux) - self.a * (h_right_flux - h_left_flux) * alpha #(self.g / c_ho)
-        # alpha = torch.maximum(c_up / self.h_up, c_down / self.h_down)
+        # alpha = torch.maximum(c_ve / self.h_up, c_ve / self.h_down)
         # uv_flux_vert = 0.5 * (uv_up_flux + uv_down_flux) - self.a * (h_up_flux - h_down_flux) * alpha #(self.g / c_ve) * (h_up_flux - h_down_flux)
 
-        uv_flux_horz = 0.5 * (uv_right_flux + uv_left_flux) - self.a * c_snd_ho * (vel_right - vel_left)
-        uv_flux_vert = 0.5 * (uv_up_flux + uv_down_flux) - self.a * c_snd_ve * (vel_up - vel_down)
+        uv_flux_horz = 0.5 * (uv_right_flux + uv_left_flux) - self.a * c_snd_ho * (h_right_flux - h_left_flux) / h_ho
+        uv_flux_vert = 0.5 * (uv_up_flux + uv_down_flux) - self.a * c_snd_ve * (h_up_flux - h_down_flux) / h_ve
 
         if self.b is not None:
             uv_flux += self.g * self.b
@@ -1058,17 +1061,17 @@ class DGCubedSphereFace:
         u_k[:, :, :, -1] -= 0.5 * (u_perp_left * (v_cov_right - v_cov_left))[:, 1:] * (1 / self.J)[..., -1] / wx
         u_k[:, :, :, 0] -= 0.5 * (u_perp_right * (v_cov_right - v_cov_left))[:, :-1] * (1 / self.J)[..., 0] / wx
 
-        # diss = -self.a * c_adv_vert * (u_cov_up - u_cov_down)
-        # u_k[:, :, -1] -= diss[1:] * self.J_eta[:, :, -1] / wx
-        # u_k[:, :, 0] += diss[:-1] * self.J_eta[:, :, 0] / wx
-        #
-        # diss = -self.a * c_adv_horz * (u_cov_right - u_cov_left)
-        # u_k[:, :, :, -1] -= diss[:, 1:] * self.J_xi[:, :, :, -1] / wx
-        # u_k[:, :, :, 0] += diss[:, -1] * self.J_xi[:, :, :, 0] / wx
-        #
-        # diss = self.a * c_adv_horz * (vel_right - vel_left)
-        # u_k[:, :, :, -1] -= diss[:, 1:] / wx
-        # u_k[:, :, :, 0] += diss[:, -1] / wx
+        diss = -self.a * c_adv_vert * (self.h_up * u_cov_up - self.h_down * u_cov_down) / h_ve
+        u_k[:, :, -1] -= diss[1:] * self.J_eta[:, :, -1] / wx
+        u_k[:, :, 0] += diss[:-1] * self.J_eta[:, :, 0] / wx
+
+        diss = -self.a * c_adv_horz * (self.h_right * u_cov_right - self.h_left * u_cov_left) / h_ho
+        u_k[:, :, :, -1] -= diss[:, 1:] * self.J_xi[:, :, :, -1] / wx
+        u_k[:, :, :, 0] += diss[:, -1] * self.J_xi[:, :, :, 0] / wx
+
+        diss = self.a * c_adv_horz * (self.h_right * vel_right - self.h_left * vel_left) / h_ho
+        u_k[:, :, :, -1] -= diss[:, 1:] / wx
+        u_k[:, :, :, 0] += diss[:, -1] / wx
 
         # handle v
         #######
@@ -1085,17 +1088,17 @@ class DGCubedSphereFace:
         v_k[:, :, :, -1] -= 0.5 * (v_perp_left * (v_cov_right - v_cov_left))[:, 1:] * (1 / self.J)[..., -1] / wx
         v_k[:, :, :, 0] -= 0.5 * (v_perp_right * (v_cov_right - v_cov_left))[:, :-1] * (1 / self.J)[..., 0] / wx
 
-        # diss = -self.a * c_adv_vert * (v_cov_up - v_cov_down)
-        # v_k[:, :, -1] -= diss[1:] * self.J_eta[:, :, -1] / wx
-        # v_k[:, :, 0] += diss[:-1] * self.J_eta[:, :, 0] / wx
-        #
-        # diss = self.a * c_adv_vert * (vel_up - vel_down)
-        # v_k[:, :, -1] -= diss[1:] / wx
-        # v_k[:, :, 0] += diss[:-1] / wx
-        #
-        # diss = -self.a * c_adv_horz * (v_cov_right - v_cov_left)
-        # v_k[:, :, :, -1] -= diss[:, 1:] * self.J_xi[:, :, :, -1] / wx
-        # v_k[:, :, :, 0] += diss[:, -1] * self.J_xi[:, :, :, 0] / wx
+        diss = -self.a * c_adv_vert * (self.h_up * v_cov_up - self.h_down * v_cov_down) / h_ve
+        v_k[:, :, -1] -= diss[1:] * self.J_eta[:, :, -1] / wx
+        v_k[:, :, 0] += diss[:-1] * self.J_eta[:, :, 0] / wx
+
+        diss = self.a * c_adv_vert * (self.h_up * vel_up - self.h_down * vel_down) / h_ve
+        v_k[:, :, -1] -= diss[1:] / wx
+        v_k[:, :, 0] += diss[:-1] / wx
+
+        diss = -self.a * c_adv_horz * (self.h_right * v_cov_right - self.h_left * v_cov_left) / h_ho
+        v_k[:, :, :, -1] -= diss[:, 1:] * self.J_xi[:, :, :, -1] / wx
+        v_k[:, :, :, 0] += diss[:, -1] * self.J_xi[:, :, :, 0] / wx
 
 
         u_k, v_k, w_k = self.cov_to_phys(u_k, v_k, 0)
