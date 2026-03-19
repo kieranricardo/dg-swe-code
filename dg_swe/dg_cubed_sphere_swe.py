@@ -11,12 +11,13 @@ class DGCubedSphereSWE:
     def __init__(
             self, poly_order, nx, ny, g, f, eps, radius=1.0, device='cpu',
             solution=None, a=0.0, dtype=np.float32, damping=None,
-            tau_func=lambda t, dt: t, tau=0, **kwargs):
+            tau_func=lambda t, dt: t, tau=0, tangent_diss=False, **kwargs):
 
         self.face_names = ['zp', 'zn', 'xp', 'xn', 'yp', 'yn']
         self.faces = {
             name: DGCubedSphereFace(
-                name, poly_order, nx, ny, g, f, radius, eps, device, a=a, dtype=dtype, damping=None, bc='', tau=tau
+                name, poly_order, nx, ny, g, f, radius, eps, device, a=a, dtype=dtype,
+                damping=None, bc='', tau=tau, tangent_diss=tangent_diss
             )
             for name in self.face_names
         }
@@ -25,6 +26,7 @@ class DGCubedSphereSWE:
         self.damping = damping
         self.tau_func = tau_func
         self.flag = True
+        self.tangent_diss = tangent_diss
 
         self.time_list = []
         self.energy_list = []
@@ -373,7 +375,7 @@ class DGCubedSphereFace:
     def __init__(
             self, name, poly_order, nx, ny, g, f, radius, eps, device='cpu',
             solution=None, a=0.0, dtype=np.float32, damping=None,
-            tau_func=lambda t, dt: t, bc='wall', tau=0.0, **kwargs):
+            tau_func=lambda t, dt: t, bc='wall', tau=0.0, tangent_diss=False, **kwargs):
 
         valid_names = ['zp', 'zn', 'xp', 'xn', 'yp', 'yn']
         if not name in valid_names:
@@ -396,6 +398,7 @@ class DGCubedSphereFace:
         self.geometry = EquiangularFace(name, radius=radius)
         self.connections = self.geometry.connections
         self.tau = tau
+        self.tangent_diss = tangent_diss
 
         [xs_1d, w_x] = gll(poly_order, iterative=True)
         [y_1d, w_y] = gll(poly_order, iterative=True)
@@ -1061,17 +1064,18 @@ class DGCubedSphereFace:
         u_k[:, :, :, -1] -= 0.5 * (u_perp_left * (v_cov_right - v_cov_left))[:, 1:] * (1 / self.J)[..., -1] / wx
         u_k[:, :, :, 0] -= 0.5 * (u_perp_right * (v_cov_right - v_cov_left))[:, :-1] * (1 / self.J)[..., 0] / wx
 
-        diss = -self.a * c_adv_vert * (self.h_up * u_cov_up - self.h_down * u_cov_down) / h_ve
-        u_k[:, :, -1] -= diss[1:] * self.J_eta[:, :, -1] / wx
-        u_k[:, :, 0] += diss[:-1] * self.J_eta[:, :, 0] / wx
+        if self.tangent_diss:
+            diss = -self.a * c_adv_vert * (self.h_up * u_cov_up - self.h_down * u_cov_down) / h_ve
+            u_k[:, :, -1] -= diss[1:] * self.J_eta[:, :, -1] / wx
+            u_k[:, :, 0] += diss[:-1] * self.J_eta[:, :, 0] / wx
 
-        diss = -self.a * c_adv_horz * (self.h_right * u_cov_right - self.h_left * u_cov_left) / h_ho
-        u_k[:, :, :, -1] -= diss[:, 1:] * self.J_xi[:, :, :, -1] / wx
-        u_k[:, :, :, 0] += diss[:, -1] * self.J_xi[:, :, :, 0] / wx
+            diss = -self.a * c_adv_horz * (self.h_right * u_cov_right - self.h_left * u_cov_left) / h_ho
+            u_k[:, :, :, -1] -= diss[:, 1:] * self.J_xi[:, :, :, -1] / wx
+            u_k[:, :, :, 0] += diss[:, -1] * self.J_xi[:, :, :, 0] / wx
 
-        diss = self.a * c_adv_horz * (self.h_right * vel_right - self.h_left * vel_left) / h_ho
-        u_k[:, :, :, -1] -= diss[:, 1:] / wx
-        u_k[:, :, :, 0] += diss[:, -1] / wx
+            diss = self.a * c_adv_horz * (self.h_right * vel_right - self.h_left * vel_left) / h_ho
+            u_k[:, :, :, -1] -= diss[:, 1:] / wx
+            u_k[:, :, :, 0] += diss[:, -1] / wx
 
         # handle v
         #######
@@ -1088,17 +1092,18 @@ class DGCubedSphereFace:
         v_k[:, :, :, -1] -= 0.5 * (v_perp_left * (v_cov_right - v_cov_left))[:, 1:] * (1 / self.J)[..., -1] / wx
         v_k[:, :, :, 0] -= 0.5 * (v_perp_right * (v_cov_right - v_cov_left))[:, :-1] * (1 / self.J)[..., 0] / wx
 
-        diss = -self.a * c_adv_vert * (self.h_up * v_cov_up - self.h_down * v_cov_down) / h_ve
-        v_k[:, :, -1] -= diss[1:] * self.J_eta[:, :, -1] / wx
-        v_k[:, :, 0] += diss[:-1] * self.J_eta[:, :, 0] / wx
+        if self.tangent_diss:
+            diss = -self.a * c_adv_vert * (self.h_up * v_cov_up - self.h_down * v_cov_down) / h_ve
+            v_k[:, :, -1] -= diss[1:] * self.J_eta[:, :, -1] / wx
+            v_k[:, :, 0] += diss[:-1] * self.J_eta[:, :, 0] / wx
 
-        diss = self.a * c_adv_vert * (self.h_up * vel_up - self.h_down * vel_down) / h_ve
-        v_k[:, :, -1] -= diss[1:] / wx
-        v_k[:, :, 0] += diss[:-1] / wx
+            diss = self.a * c_adv_vert * (self.h_up * vel_up - self.h_down * vel_down) / h_ve
+            v_k[:, :, -1] -= diss[1:] / wx
+            v_k[:, :, 0] += diss[:-1] / wx
 
-        diss = -self.a * c_adv_horz * (self.h_right * v_cov_right - self.h_left * v_cov_left) / h_ho
-        v_k[:, :, :, -1] -= diss[:, 1:] * self.J_xi[:, :, :, -1] / wx
-        v_k[:, :, :, 0] += diss[:, -1] * self.J_xi[:, :, :, 0] / wx
+            diss = -self.a * c_adv_horz * (self.h_right * v_cov_right - self.h_left * v_cov_left) / h_ho
+            v_k[:, :, :, -1] -= diss[:, 1:] * self.J_xi[:, :, :, -1] / wx
+            v_k[:, :, :, 0] += diss[:, -1] * self.J_xi[:, :, :, 0] / wx
 
 
         u_k, v_k, w_k = self.cov_to_phys(u_k, v_k, 0)

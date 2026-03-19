@@ -10,11 +10,13 @@ if not os.path.exists('./data'): os.makedirs('./data')
 
 plt.rcParams['font.size'] = '12'
 
-mode = 'restart'
+mode = 'plot'
 i_start = 40
 dev = 'cpu'
 
 eps = 0.8 * 2
+tangent_diss = False
+
 nx = ny = 64
 
 g = 9.80616 / 250
@@ -23,6 +25,11 @@ radius = 6.37122e6
 u_0 = 0.5
 h_0 = 5960.0
 
+def get_fn_template(day, tangent_diss):
+    if tangent_diss:
+        return f"reduced_williamson_5_day_{day}_nx{nx}_p{poly_order}_tangent_diss.npy"
+    else:
+        return f"reduced_williamson_5_day_{day}_nx{nx}_p{poly_order}.npy"
 # print('Froude number:', u_0 / np.sqrt(g * h_0))
 
 poly_order = 3
@@ -93,7 +100,7 @@ def plot_orography(idx):
 solver = DGCubedSphereSWE(
     poly_order, nx, ny, g, f,
     eps, device=dev, solution=None, a=0.5, radius=radius,
-    dtype=np.float64, damping=None
+    dtype=np.float64, damping=None, tangent_diss=tangent_diss
 )
 
 for face in solver.faces.values():
@@ -101,13 +108,20 @@ for face in solver.faces.values():
 
 print('Initial dt:', solver.get_dt())
 
+# print(solver.tangent_diss)
+# for face in solver.faces.values():
+#     print(face.tangent_diss)
+# print(get_fn_template(10, True))
+# print(get_fn_template(11, False))
+#
+# exit(0)
 # exit(0)
 
 # plot_orography(1)
 
 if mode == 'run':
     t0 = time.time()
-    for i in range(40):
+    for i in range(100):
         print('\nRunning day', i + 1)
         tend = solver.time + 3600 * 24
         print('h min max:', min(f.h.min() for f in solver.faces.values()), max(f.h.max() for f in solver.faces.values()), solver.get_dt())
@@ -121,7 +135,7 @@ if mode == 'run':
             solver.time_step(dt=dt, order=34)
 
         if ((i + 1) % 20 == 0):
-            fn_template = f"reduced_williamson_5_day_{i + 1}_nx{nx}_p{poly_order}_tangent_diss.npy"
+            fn_template = get_fn_template(i + 1, tangent_diss)
             print('Saving:', fn_template)
             solver.save_restart(fn_template, 'data')
     t1 = time.time()
@@ -129,7 +143,8 @@ if mode == 'run':
 
 if mode == 'restart':
 
-    fn_template = f"reduced_williamson_5_day_{i_start}_nx{nx}_p{poly_order}_tangent_diss.npy"
+    fn_template = get_fn_template(i_start, tangent_diss)
+    print('Loading:', fn_template)
     solver.load_restart(fn_template, 'data')
 
     for i in range(i_start, i_start + 60):
@@ -146,7 +161,7 @@ if mode == 'restart':
             solver.time_step(dt=dt, order=34)
 
         if ((i + 1) % 20 == 0):
-            fn_template = f"reduced_williamson_5_day_{i + 1}_nx{nx}_p{poly_order}_tangent_diss.npy"
+            fn_template = get_fn_template(i + 1, tangent_diss)
             print('Saving:', fn_template)
             solver.save_restart(fn_template, 'data')
         # fn_template = f"reduced_williamson_5_day_{i + 1}.npy"
@@ -161,16 +176,16 @@ pv_plot_func = lambda s: (s.vorticity() - s.f) / (s.h)
 
 #days = np.array([1, 2, 3, 4]) * 360
 # days = list(days) + [1800,]
-days = [40,]
+days = [100,]
 for i, day in enumerate(days):
 # for i, day in enumerate([360, 400, 700]):
-    fn_template = f"reduced_williamson_5_day_{day}_nx{nx}_p{poly_order}.npy"
+    fn_template = fn_template = get_fn_template(day, tangent_diss=False)
     solver.load_restart(fn_template, 'data')
     plot_data(2 * i + 1, f'vort_day_{day}_nx{nx}_p{poly_order}', vort_plot_func, vmin=-3e-5, vmax=3e-5)
     # plot_data(2 * i + 1, f'pv_day_{day}_nx{nx}_p{poly_order}', pv_plot_func)
     plot_data(2 * i + 2, f'height_day_{day}_nx{nx}_p{poly_order}', h_plot_func)
 
-    fn_template = f"reduced_williamson_5_day_{day}_nx{nx}_p{poly_order}_tangent_diss.npy"
+    fn_template = fn_template = get_fn_template(day, tangent_diss=True)
     solver.load_restart(fn_template, 'data')
     plot_data(2 * i + 3, f'vort_day_{day}_nx{nx}_p{poly_order}_tangent_diss', vort_plot_func, vmin=-3e-5, vmax=3e-5)
     # plot_data(2 * i + 1, f'pv_day_{day}_nx{nx}_p{poly_order}', pv_plot_func)
