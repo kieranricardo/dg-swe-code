@@ -79,7 +79,7 @@ if mode == 'run':
         solver = DGCubedSphereSWE(
             poly_order, nx, ny, g, f,
             eps, device=dev, solution=None, a=a, radius=radius,
-            dtype=np.float64
+            dtype=np.float64, tangent_diss=True
         )
         for face in solver.faces.values():
             face.set_initial_condition(*initial_condition(face))
@@ -123,12 +123,12 @@ elif mode == 'plot':
     interpolator = Interpolate(3, p)
 
     exp_names = [f'DG_res_6x{nx}x{ny}', f'DG_cntr_res_6x{nx}x{ny}'][:1]
-    # labels = ['Diss.', 'Cons.']
-    #
-    # for exp, label in zip(exp_names, labels):
-    #     fn_template = f"{exp}_day_{20}.npy"
-    #     solver.plot_diagnostics(fn_template, 'data', 1, label)
-    #
+    labels = ['Diss.', 'Cons.']
+
+    for exp, label in zip(exp_names, labels):
+        fn_template = f"{exp}_day_{20}.npy"
+        solver.plot_diagnostics(fn_template, 'data', 1, label)
+
     # plt.savefig(f'./plots/galewsky_conservation.png')
 
     vmin = -0.00015; vmax = 0.00015

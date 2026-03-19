@@ -748,7 +748,7 @@ class DGCubedSphereFace:
         dudt, dvdt, dwdt, dhdt = self.solve(u, v, w, h, 0, 0)
         # E = 0.5 * h * |u|^2 + 0.5 * g * h^2
         dEdt = h * (u * dudt + v * dvdt + w * dwdt)
-        dEdt += (0.5 * (u ** 2 + v ** 2 + w ** 2) + self.g * h) * dhdt
+        dEdt += (0.5 * (u ** 2 + v ** 2 + w ** 2) + self.g * (h + self.b)) * dhdt
         return dEdt
 
     def dg_vort(self, u=None, v=None, w=None, h=None):
@@ -975,9 +975,8 @@ class DGCubedSphereFace:
 
         c_snd_ho = 0.5 * (np.sqrt(self.g * self.h_right) + np.sqrt(self.g * self.h_left))
         c_snd_ve = 0.5 * (np.sqrt(self.g * self.h_up) + np.sqrt(self.g * self.h_down))
-        c_ho = c_adv_horz + c_snd_ho
-        c_ve = c_adv_vert + c_snd_ve
-
+        # c_ho = c_adv_horz + c_snd_ho
+        # c_ve = c_adv_vert + c_snd_ve
         h_ve = 0.5 * (self.h_up + self.h_down)
         h_ho = 0.5 * (self.h_right + self.h_left)
 
@@ -1065,17 +1064,17 @@ class DGCubedSphereFace:
         u_k[:, :, :, 0] -= 0.5 * (u_perp_right * (v_cov_right - v_cov_left))[:, :-1] * (1 / self.J)[..., 0] / wx
 
         if self.tangent_diss:
-            diss = -self.a * c_adv_vert * (self.h_up * u_cov_up - self.h_down * u_cov_down) / h_ve
+            diss = -0.5 * c_adv_vert * (self.h_up * u_cov_up - self.h_down * u_cov_down) / h_ve
             u_k[:, :, -1] -= diss[1:] * self.J_eta[:, :, -1] / wx
             u_k[:, :, 0] += diss[:-1] * self.J_eta[:, :, 0] / wx
 
-            diss = -self.a * c_adv_horz * (self.h_right * u_cov_right - self.h_left * u_cov_left) / h_ho
+            diss = -0.5 * c_adv_horz * (self.h_right * u_cov_right - self.h_left * u_cov_left) / h_ho
             u_k[:, :, :, -1] -= diss[:, 1:] * self.J_xi[:, :, :, -1] / wx
-            u_k[:, :, :, 0] += diss[:, -1] * self.J_xi[:, :, :, 0] / wx
+            u_k[:, :, :, 0] += diss[:, :-1] * self.J_xi[:, :, :, 0] / wx
 
-            diss = self.a * c_adv_horz * (self.h_right * vel_right - self.h_left * vel_left) / h_ho
+            diss = 0.5 * c_adv_horz * (h_right_flux - h_left_flux) / h_ho
             u_k[:, :, :, -1] -= diss[:, 1:] / wx
-            u_k[:, :, :, 0] += diss[:, -1] / wx
+            u_k[:, :, :, 0] += diss[:, :-1] / wx
 
         # handle v
         #######
@@ -1093,18 +1092,17 @@ class DGCubedSphereFace:
         v_k[:, :, :, 0] -= 0.5 * (v_perp_right * (v_cov_right - v_cov_left))[:, :-1] * (1 / self.J)[..., 0] / wx
 
         if self.tangent_diss:
-            diss = -self.a * c_adv_vert * (self.h_up * v_cov_up - self.h_down * v_cov_down) / h_ve
+            diss = -0.5 * c_adv_vert * (self.h_up * v_cov_up - self.h_down * v_cov_down) / h_ve
             v_k[:, :, -1] -= diss[1:] * self.J_eta[:, :, -1] / wx
             v_k[:, :, 0] += diss[:-1] * self.J_eta[:, :, 0] / wx
 
-            diss = self.a * c_adv_vert * (self.h_up * vel_up - self.h_down * vel_down) / h_ve
+            diss = 0.5 * c_adv_vert * (self.h_up * vel_up - self.h_down * vel_down) / h_ve
             v_k[:, :, -1] -= diss[1:] / wx
             v_k[:, :, 0] += diss[:-1] / wx
 
-            diss = -self.a * c_adv_horz * (self.h_right * v_cov_right - self.h_left * v_cov_left) / h_ho
+            diss = -0.5 * c_adv_horz * (self.h_right * v_cov_right - self.h_left * v_cov_left) / h_ho
             v_k[:, :, :, -1] -= diss[:, 1:] * self.J_xi[:, :, :, -1] / wx
-            v_k[:, :, :, 0] += diss[:, -1] * self.J_xi[:, :, :, 0] / wx
-
+            v_k[:, :, :, 0] += diss[:, :-1] * self.J_xi[:, :, :, 0] / wx
 
         u_k, v_k, w_k = self.cov_to_phys(u_k, v_k, 0)
 
