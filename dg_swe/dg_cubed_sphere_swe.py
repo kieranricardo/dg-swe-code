@@ -10,13 +10,13 @@ import os
 class DGCubedSphereSWE:
     def __init__(
             self, poly_order, nx, ny, g, f, eps, radius=1.0, device='cpu',
-            solution=None, a=0.0, dtype=np.float32, damping=None,
+            solution=None, a=0.0, ah=0.0, dtype=np.float32, damping=None,
             tau_func=lambda t, dt: t, tau=0, tangent_diss=False, **kwargs):
 
         self.face_names = ['zp', 'zn', 'xp', 'xn', 'yp', 'yn']
         self.faces = {
             name: DGCubedSphereFace(
-                name, poly_order, nx, ny, g, f, radius, eps, device, a=a, dtype=dtype,
+                name, poly_order, nx, ny, g, f, radius, eps, device, a=a, ah=ah, dtype=dtype,
                 damping=None, bc='', tau=tau, tangent_diss=tangent_diss
             )
             for name in self.face_names
@@ -129,7 +129,8 @@ class DGCubedSphereSWE:
             cell_mins = state[n][3].amin(dim=(2, 3))
             diff_min = cell_mins - cell_means
 
-            new_min = np.maximum(5 + 0 * cell_mins, cell_mins)
+            new_min = np.minimum(5, cell_means)
+            new_min = np.maximum(new_min, cell_mins)
             scale = (new_min - cell_means) / diff_min
 
             # scale = (cell_mins > 5.0)
@@ -409,7 +410,7 @@ class DGCubedSphereFace:
 
     def __init__(
             self, name, poly_order, nx, ny, g, f, radius, eps, device='cpu',
-            solution=None, a=0.0, dtype=np.float32, damping=None,
+            solution=None, a=0.0, ah=0.0, dtype=np.float32, damping=None,
             tau_func=lambda t, dt: t, bc='wall', tau=0.0, tangent_diss=False, **kwargs):
 
         valid_names = ['zp', 'zn', 'xp', 'xn', 'yp', 'yn']
@@ -424,6 +425,7 @@ class DGCubedSphereFace:
         self.g = g
         self.eps = eps
         self.a = a
+        self.ah = ah
         self.solution = solution
         self.dtype = dtype
         self.damping = damping
@@ -1015,8 +1017,11 @@ class DGCubedSphereFace:
         h_ve = 0.5 * (self.h_up + self.h_down)
         h_ho = 0.5 * (self.h_right + self.h_left)
 
-        h_flux_vert = 0.5 * (h_up_flux + h_down_flux) #- self.a * c_snd_ve * (self.h_up - self.h_down)
-        h_flux_horz = 0.5 * (h_right_flux + h_left_flux) #- self.a * c_snd_ho * (self.h_right - self.h_left)
+        h_flux_vert = 0.5 * (h_up_flux + h_down_flux) - self.ah * c_snd_ve * (self.h_up - self.h_down)
+        h_flux_horz = 0.5 * (h_right_flux + h_left_flux) - self.ah * c_snd_ho * (self.h_right - self.h_left)
+
+        # h_flux_vert = 0.5 * (h_up_flux + h_down_flux) - self.a * c_snd_ve * (uv_up_flux - uv_down_flux) / self.g
+        # h_flux_horz = 0.5 * (h_right_flux + h_left_flux) - self.a * c_snd_ho * (uv_right_flux - uv_left_flux) / self.g
 
         self.tmp1[:, :, -1] = (h_flux_vert[1:] - h_down_flux[1:]) * (self.weights_x * self.J_vertface[:, :, -1])
         self.tmp1[:, :, 0] = -(h_flux_vert[:-1] - h_up_flux[:-1]) * (self.weights_x * self.J_vertface[:, :, 0])

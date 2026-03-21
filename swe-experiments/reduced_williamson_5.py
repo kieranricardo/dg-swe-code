@@ -10,13 +10,18 @@ if not os.path.exists('./data'): os.makedirs('./data')
 
 plt.rcParams['font.size'] = '12'
 
-mode = 'restart'
-i_start = 1400
+mode = 'run'
+i_start = 4000
 dev = 'cpu'
 
 eps = 0.8 * 2
 tangent_diss = True
+h_diss = True
 
+if h_diss:
+    ah = 0.5
+else:
+    ah = 0.0
 nx = ny = 64
 
 g = 9.80616 / 250
@@ -26,10 +31,14 @@ u_0 = 0.5
 h_0 = 5960.0
 
 def get_fn_template(day, tangent_diss):
+    suffix = ''
     if tangent_diss:
-        return f"reduced_williamson_5_day_{day}_nx{nx}_p{poly_order}_tangent_diss.npy"
-    else:
-        return f"reduced_williamson_5_day_{day}_nx{nx}_p{poly_order}.npy"
+        suffix = suffix + 'tangent_diss'
+
+    if h_diss:
+        suffix = suffix + '_h_diss'
+
+    return f"reduced_williamson_5_day_{day}_nx{nx}_p{poly_order}_{suffix}.npy"
 # print('Froude number:', u_0 / np.sqrt(g * h_0))
 
 poly_order = 3
@@ -99,7 +108,7 @@ def plot_orography(idx):
 
 solver = DGCubedSphereSWE(
     poly_order, nx, ny, g, f,
-    eps, device=dev, solution=None, a=0.5, radius=radius,
+    eps, device=dev, solution=None, a=0.5, ah=ah, radius=radius,
     dtype=np.float64, damping=None, tangent_diss=tangent_diss
 )
 
@@ -107,7 +116,6 @@ for face in solver.faces.values():
     face.set_initial_condition(*initial_condition(face))
 
 print('Initial dt:', solver.get_dt())
-
 # print(solver.tangent_diss)
 # for face in solver.faces.values():
 #     print(face.tangent_diss)
@@ -173,7 +181,7 @@ if mode == 'restart':
     print('Loading:', fn_template)
     solver.load_restart(fn_template, 'data')
 
-    for i in range(i_start, i_start + 20):
+    for i in range(i_start, 2000):
         print('\nRunning day', i + 1)
         tend = solver.time + 3600 * 24
         print('h min max:', min(f.h.min() for f in solver.faces.values()), max(f.h.max() for f in solver.faces.values()), solver.get_dt())
@@ -186,7 +194,7 @@ if mode == 'restart':
             dt = min(dt, tend - solver.time)
             solver.time_step(dt=dt, order=34)
 
-        if ((i + 1) % 1 == 0):
+        if ((i + 1) % 20 == 0):
             fn_template = get_fn_template(i + 1, tangent_diss)
             print('Saving:', fn_template)
             solver.save_restart(fn_template, 'data')
@@ -200,9 +208,10 @@ vort_plot_func = lambda s: s.vorticity() - s.f
 
 pv_plot_func = lambda s: (s.vorticity() - s.f) / (s.h)
 
+# exit(0)
 #days = np.array([1, 2, 3, 4]) * 360
 # days = list(days) + [1800,]
-days = [1410,]
+days = [720,]
 for i, day in enumerate(days):
 # for i, day in enumerate([360, 400, 700]):
     fn_template = fn_template = get_fn_template(day, tangent_diss=True)
