@@ -10,7 +10,7 @@ if not os.path.exists('./data'): os.makedirs('./data')
 
 plt.rcParams['font.size'] = '12'
 
-mode = 'run'
+mode = 'plot'
 i_start = 4000
 dev = 'cpu'
 
@@ -211,7 +211,7 @@ pv_plot_func = lambda s: (s.vorticity() - s.f) / (s.h)
 # exit(0)
 #days = np.array([1, 2, 3, 4]) * 360
 # days = list(days) + [1800,]
-days = [720,]
+days = [3600,]
 for i, day in enumerate(days):
 # for i, day in enumerate([360, 400, 700]):
     fn_template = fn_template = get_fn_template(day, tangent_diss=True)
