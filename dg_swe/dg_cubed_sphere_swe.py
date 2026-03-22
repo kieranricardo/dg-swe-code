@@ -33,7 +33,7 @@ class DGCubedSphereSWE:
         self.enstrophy_list = []
         self.mass_list = []
         self.vorticity_list = []
-        self.H1 = True # calculates a continuous diagnostic vorticity for plotting
+        self.vorticity_diagnostic = True # calculates a continuous diagnostic vorticity for plotting
 
     def set_vort(self, sol):
         for name in self.face_names:
@@ -45,7 +45,7 @@ class DGCubedSphereSWE:
         if sol is None:
             sol = {n: (self.faces[n].u, self.faces[n].v, self.faces[n].w, self.faces[n].h) for n in self.face_names}
 
-        if self.H1:
+        if self.vorticity_diagnostic:
             self.set_vort(sol)
 
         for name in self.face_names:
