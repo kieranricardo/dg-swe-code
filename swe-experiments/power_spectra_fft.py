@@ -4,17 +4,6 @@ import numpy as np
 import os
 import pickle
 
-try:
-    from scipy.special import sph_harm_y
-
-    def spherical_harmonic(m, n, lon, colat):
-        return sph_harm_y(n, m, colat, lon)
-except ImportError:
-    from scipy.special import sph_harm
-
-    def spherical_harmonic(m, n, lon, colat):
-        return sph_harm(m, n, lon, colat)
-
 
 plt.rcParams['font.size'] = '14'
 
@@ -37,14 +26,19 @@ else:
     ah = 0.0
 
 nx = ny = 64
-max_n = 100
+max_n = 200
 nlat = max(4 * max_n + 1, 2 * (ny - 1) * (poly_order + 1) + 1)
 nlon = max(8 * max_n + 2, 4 * (nx - 1) * (poly_order + 1) + 2)
-day = 16
-exp_name = f'DG_res_6x{nx}x{ny}'
+# day = 16
+# exp_name = f'DG_res_6x{nx}x{ny}'
+# data_dir = os.environ.get(
+#     'SWE_DATA_DIR',
+#     '/Users/u5824685/Documents/repos/dg-tswe-paper/tswe-experiments/data'
+# )
+
 data_dir = os.environ.get(
     'SWE_DATA_DIR',
-    '/Users/u5824685/Documents/repos/dg-tswe-paper/tswe-experiments/data'
+    'data'
 )
 
 def get_fn_template(day):
@@ -83,6 +77,48 @@ def evaluate_ke_latlon(solver, lat_grid, lon_grid):
     return solver.evaluate_latlong(lat_grid, lon_grid, ke_coeffs)
 
 
+def normalized_associated_legendre(n, m, x):
+    if m < 0 or m > n:
+        raise ValueError(f"Need 0 <= m <= n. Found m={m}, n={n}.")
+
+    x = np.asarray(x, dtype=np.float64)
+    sin_colat = np.sqrt(np.maximum(0.0, 1.0 - x ** 2))
+
+    pmm = np.full_like(x, 1 / np.sqrt(4 * np.pi), dtype=np.float64)
+    for k in range(1, m + 1):
+        pmm *= -np.sqrt((2 * k + 1) / (2 * k)) * sin_colat
+
+    if n == m:
+        return pmm
+
+    p_prev = pmm
+    p_curr = np.sqrt(2 * m + 3) * x * pmm
+    if n == m + 1:
+        return p_curr
+
+    for ell in range(m + 2, n + 1):
+        a = np.sqrt((2 * ell + 1) * (2 * ell - 1) / ((ell - m) * (ell + m)))
+        b = np.sqrt(
+            (2 * ell + 1) * (ell + m - 1) * (ell - m - 1)
+            / ((2 * ell - 3) * (ell - m) * (ell + m))
+        )
+        p_next = a * x * p_curr - b * p_prev
+        p_prev = p_curr
+        p_curr = p_next
+
+    return p_curr
+
+
+def spherical_harmonic_latitude(m, n, colat):
+    m_abs = abs(m)
+    lat_basis = normalized_associated_legendre(n, m_abs, np.cos(colat))
+
+    if m < 0 and m_abs % 2:
+        lat_basis = -lat_basis
+
+    return lat_basis
+
+
 def spherical_harmonic_coefficients_fft(values, colat, mu_weights, max_n):
     if values.ndim != 2:
         raise ValueError(f"values: expected a 2D lat/lon array. Found shape {values.shape}.")
@@ -99,12 +135,11 @@ def spherical_harmonic_coefficients_fft(values, colat, mu_weights, max_n):
     lon_fft = np.fft.fft(values, axis=1) * dlon
 
     coeffs = []
-    lon0 = 0.0
     for n in range(max_n):
         coeffs_n = []
         for m in range(-n, n + 1):
             lon_integral = lon_fft[:, m % nlon_]
-            lat_basis = np.conjugate(spherical_harmonic(m, n, lon0, colat))
+            lat_basis = spherical_harmonic_latitude(m, n, colat)
             coeffs_n.append(np.sum(lon_integral * lat_basis * mu_weights))
         coeffs.append(coeffs_n)
 
@@ -113,22 +148,21 @@ def spherical_harmonic_coefficients_fft(values, colat, mu_weights, max_n):
 
 def plot_spectrum(spectrum, fn_template):
     fig, ax = plt.subplots()
-    print('Spectrum:', spectrum[-10:])
     ax.semilogy(spectrum)
-
-    if len(spectrum) > 15:
-        ks = np.arange(15, len(spectrum))
-        line = ks ** (-5 / 3)
-        line *= spectrum[15] / line[0]
-        ax.loglog(ks, line, linestyle='dotted', label=r'$-5/3$')
+    idx = 45
+    if len(spectrum) > idx:
+        ks = np.arange(idx, len(spectrum))
+        line = ks ** (-5/3.0)
+        line *= spectrum[idx] / line[0]
+        ax.loglog(ks, line, linestyle='dotted', label=r'$n^{-5/3}$')
 
     ax.grid()
     ax.set_xlabel('Spherical wavenumber')
     ax.set_ylabel('Power')
     ax.legend()
 
-    fp = os.path.join('plots', f'{fn_template}_power_spectra_fft_n{max_n}_nlat{nlat}_nlon{nlon}.png')
-    # fig.savefig(fp)
+    fp = os.path.join('plots', f'{fn_template}_ke_spectra_fft_n{max_n}_nlat{nlat}_nlon{nlon}.png')
+    fig.savefig(fp)
     plt.show()
 
 
@@ -145,9 +179,11 @@ def main():
         dtype=np.float64, tangent_diss=tangent_diss
     )
 
-    fn_template = f"{exp_name}_day_{day}.npy"
-    fp = os.path.join('data', f'{fn_template}_power_spectra_fft_n{max_n}_nlat{nlat}_nlon{nlon}.pkl')
 
+    fn_template = get_fn_template(1080)
+    # fn_template = f"{exp_name}_day_{day}.npy"
+    fp = os.path.join('data', f'{fn_template}_power_spectra_fft_n{max_n}_nlat{nlat}_nlon{nlon}.pkl')
+    
     if compute:
         print('Loading', fn_template)
         solver.load_restart(fn_template, data_dir)
