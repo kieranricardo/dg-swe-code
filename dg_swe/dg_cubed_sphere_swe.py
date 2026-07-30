@@ -422,6 +422,7 @@ class DGCubedSphereFace:
         self.u = None
         self.v = None
         self.h = None
+        self.b = None
         self.g = g
         self.eps = eps
         self.a = a

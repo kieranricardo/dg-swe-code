@@ -10,8 +10,8 @@ if not os.path.exists('./data'): os.makedirs('./data')
 
 plt.rcParams['font.size'] = '12'
 
-mode = 'plot'
-i_start = 4000
+mode = 'process-data'
+i_start = 100
 dev = 'cpu'
 
 eps = 0.8 * 2
@@ -29,6 +29,7 @@ f = 7.292e-5
 radius = 6.37122e6
 u_0 = 0.5
 h_0 = 5960.0
+s_0 = 4000
 
 def get_fn_template(day, tangent_diss):
     suffix = ''
@@ -37,6 +38,11 @@ def get_fn_template(day, tangent_diss):
 
     if h_diss:
         suffix = suffix + '_h_diss'
+
+    if s_0 == 4000:
+        suffix = suffix + '_big_mountain'
+    elif s_0 != 3000:
+        raise ValueError(f'suffix: expedcted one of 3000, 4000. Found {s_0}.')
 
     return f"reduced_williamson_5_day_{day}_nx{nx}_p{poly_order}_{suffix}.npy"
 # print('Froude number:', u_0 / np.sqrt(g * h_0))
@@ -57,7 +63,7 @@ def initial_condition(face):
 
     R = np.pi / 9
     r = np.sqrt((long)**2 + (lat - np.pi / 6)**2)
-    b = 3_000.0 * (1 - r / R)
+    b = s_0 * (1 - r / R)
     b[b < 0.0] = 0.0
     # print('b min max:', b.min(), b.max())
     # print()
@@ -67,9 +73,6 @@ def initial_condition(face):
     w = long_vec_z * u_
 
     return u, v, w, h - b, b
-
-
-
 
 
 def plot_data(idx, label, plot_func, vmin=None, vmax=None):
@@ -116,46 +119,10 @@ for face in solver.faces.values():
     face.set_initial_condition(*initial_condition(face))
 
 print('Initial dt:', solver.get_dt())
-# print(solver.tangent_diss)
-# for face in solver.faces.values():
-#     print(face.tangent_diss)
-# print(get_fn_template(10, True))
-# print(get_fn_template(11, False))
-#
-# exit(0)
-
-# fn_template = get_fn_template(100, tangent_diss=True)
-# print('Loading:', fn_template)
-# solver.load_restart(fn_template, 'data')
-
-# for face in solver.faces.values():
-#     face.a = 0.5
-#     face.tangent_diss = True
-#
-# dEdt = sum(face.integrate(face.dEdt()) for face in solver.faces.values())
-# print(dEdt)
-
-# for face in solver.faces.values():
-#     face.h[:] = 1.0
-#     face.a = 0.0
-#     face.tangent_diss = False
-#
-# dEdt = sum(face.integrate(face.dEdt()) for face in solver.faces.values())
-# print(dEdt)
-#
-# for face in solver.faces.values():
-#     face.a = 0.0
-#     face.tangent_diss = True
-#
-# dEdt = sum(face.integrate(face.dEdt()) for face in solver.faces.values())
-# print(dEdt)
-# exit(0)
-
-# plot_orography(1)
 
 if mode == 'run':
     t0 = time.time()
-    for i in range(4000):
+    for i in range(100):
         print('\nRunning day', i + 1)
         tend = solver.time + 3600 * 24
         print('h min max:', min(f.h.min() for f in solver.faces.values()), max(f.h.max() for f in solver.faces.values()), solver.get_dt())
@@ -181,7 +148,7 @@ if mode == 'restart':
     print('Loading:', fn_template)
     solver.load_restart(fn_template, 'data')
 
-    for i in range(i_start, 2000):
+    for i in range(i_start, 720):
         print('\nRunning day', i + 1)
         tend = solver.time + 3600 * 24
         print('h min max:', min(f.h.min() for f in solver.faces.values()), max(f.h.max() for f in solver.faces.values()), solver.get_dt())
@@ -201,6 +168,40 @@ if mode == 'restart':
         # fn_template = f"reduced_williamson_5_day_{i + 1}.npy"
         # solver.save_restart(fn_template, 'data')
 
+if mode == 'process-data':
+
+    day = 0
+    fn_template = get_fn_template(day, tangent_diss=True)
+    solver.save_restart(fn_template, 'data')
+
+    vort = solver.vorticity()
+
+    for name in solver.face_names:
+        fp = solver.make_fp('vorticity', name, fn_template, 'data')
+        print(fp)
+        np.save(fp, vort[name] - solver.faces[name].f)
+
+        face = solver.faces[name]
+        lat_long = face.geometry.lat_long(face.xs, face.ys, face.zs)
+
+        fp = solver.make_fp('lat', name, fn_template, 'data')
+        np.save(fp, lat_long[0])
+
+        fp = solver.make_fp('long', name, fn_template, 'data')
+        np.save(fp, lat_long[1])
+
+
+    for day in range(20, 721, 20):
+        fn_template = get_fn_template(day, tangent_diss=True)
+        solver.load_restart(fn_template, 'data')
+
+        vort = solver.vorticity()
+
+        for name in solver.face_names:
+            fp = solver.make_fp('vorticity', name, fn_template, 'data')
+            print(fp)
+            np.save(fp, vort[name] - solver.faces[name].f)
+
 
 h_plot_func=lambda s: s.h
 
@@ -211,14 +212,14 @@ pv_plot_func = lambda s: (s.vorticity() - s.f) / (s.h)
 # exit(0)
 #days = np.array([1, 2, 3, 4]) * 360
 # days = list(days) + [1800,]
-days = [3600,]
+days = [720,]
 for i, day in enumerate(days):
 # for i, day in enumerate([360, 400, 700]):
-    fn_template = fn_template = get_fn_template(day, tangent_diss=True)
+    fn_template = get_fn_template(day, tangent_diss=True)
     solver.load_restart(fn_template, 'data')
     print(min(f.h.min() for f in solver.faces.values()))
     # plot_data(2 * i + 1, f'vort_day_{day}_nx{nx}_p{poly_order}', vort_plot_func, vmin=-3e-5, vmax=3e-5)
-    plot_data(2 * i + 1, f'vort_day_{day}_nx{nx}_p{poly_order}', vort_plot_func)
+    plot_data(2 * i + 1, f'vort_day_{day}_nx{nx}_p{poly_order}', pv_plot_func)
     # plot_data(2 * i + 1, f'pv_day_{day}_nx{nx}_p{poly_order}', pv_plot_func)
     plot_data(2 * i + 2, f'height_day_{day}_nx{nx}_p{poly_order}', h_plot_func)
 
