@@ -1,10 +1,16 @@
 import numpy as np
-from dg_swe.utils import gll, lagrange1st, cross_product, norm_L2
+from dg_swe.utils import gll, lagrange1st, lagrange_basis_values, cross_product, norm_L2
 import meshzoo
 import torch
 from matplotlib import pyplot as plt
-from dg_swe.geometry import EquiangularFace, SadournyFace
+from dg_swe.geometry import EquiangularFace, SadournyFace, face_name_from_cartesian, lat_long_to_cartesian
 import os
+
+
+def _to_numpy(arr):
+    if isinstance(arr, torch.Tensor):
+        return arr.detach().cpu().numpy()
+    return np.asarray(arr)
 
 
 class DGCubedSphereSWE:
@@ -227,6 +233,49 @@ class DGCubedSphereSWE:
         else:
             raise ValueError(f"dim: expected one of 2, 3. Found {dim}.")
 
+    def evaluate_latlong(self, lat, long, coeffs, degrees=False):
+        """
+        Evaluate nodal DG coefficients at latitude/longitude points.
+
+        coeffs may be a dict keyed by face name, or a six-face array in
+        self.face_names order: ['zp', 'zn', 'xp', 'xn', 'yp', 'yn'].
+        """
+        lat, long = np.broadcast_arrays(lat, long)
+        if degrees:
+            lat = np.deg2rad(lat)
+            long = np.deg2rad(long)
+
+        lat_shape = lat.shape
+        lat_flat = lat.ravel()
+        long_flat = long.ravel()
+
+        x, y, z = lat_long_to_cartesian(lat_flat, long_flat, radius=self.faces[self.face_names[0]].geometry.radius)
+        face_names = face_name_from_cartesian(x, y, z).ravel()
+
+        out = None
+        for name in self.face_names:
+            mask = face_names == name
+            if not mask.any():
+                continue
+
+            face = self.faces[name]
+            x1, y1 = face.geometry.to_cubed_sphere(x[mask], y[mask], z[mask])
+            face_values = face.evaluate(x1, y1, self._face_coeffs(coeffs, name))
+
+            if out is None:
+                out = np.empty(lat_flat.shape, dtype=face_values.dtype)
+            out[mask] = face_values
+
+        if out is None:
+            out = np.empty(lat_flat.shape)
+
+        return out.reshape(lat_shape)
+
+    def _face_coeffs(self, coeffs, name):
+        if isinstance(coeffs, dict):
+            return coeffs[name]
+        return coeffs[self.face_names.index(name)]
+
     def triangular_plot(self, ax, vmin=None, vmax=None, plot_func=None, cmap='nipy_spectral', latlong=False, n=None, lines=False, levels=None):
         data = [plot_func(face).ravel() for face in self.faces.values()]
         if not latlong:
@@ -440,6 +489,7 @@ class DGCubedSphereFace:
 
         [xs_1d, w_x] = gll(poly_order, iterative=True)
         [y_1d, w_y] = gll(poly_order, iterative=True)
+        self.gll_nodes = xs_1d
 
         xs = np.linspace(-0.5, 0.5, nx)
         ys = np.linspace(-0.5, 0.5, ny)
@@ -753,6 +803,42 @@ class DGCubedSphereFace:
         self.vort_down = torch.zeros((self.ny + 1, self.nx, self.n), dtype=self.tmp1.dtype).to(self.device)
 
         self.boundaries(self.u, self.v, self.h, self.w, 0)
+
+    def locate_element(self, x1, y1):
+        x1, y1 = np.broadcast_arrays(x1, y1)
+        x1 = np.clip(x1, -0.5, 0.5)
+        y1 = np.clip(y1, -0.5, 0.5)
+
+        x_elem = (x1 + 0.5) * self.nx
+        y_elem = (y1 + 0.5) * self.ny
+
+        ix = np.floor(x_elem).astype(int)
+        iy = np.floor(y_elem).astype(int)
+        ix = np.clip(ix, 0, self.nx - 1)
+        iy = np.clip(iy, 0, self.ny - 1)
+
+        xi = np.clip(2 * (x_elem - ix) - 1, -1, 1)
+        eta = np.clip(2 * (y_elem - iy) - 1, -1, 1)
+
+        return iy, ix, eta, xi
+
+    def evaluate(self, x1, y1, coeffs):
+        """
+        Evaluate face-local nodal DG coefficients at cubed-sphere coordinates.
+        """
+        coeffs = _to_numpy(coeffs)
+        expected_shape = (self.ny, self.nx, self.n, self.n)
+        if coeffs.shape != expected_shape:
+            raise ValueError(f"coeffs: expected shape {expected_shape}. Found {coeffs.shape}.")
+
+        x1, y1 = np.broadcast_arrays(x1, y1)
+        iy, ix, eta, xi = self.locate_element(x1, y1)
+
+        eta_basis = lagrange_basis_values(eta, self.gll_nodes)
+        xi_basis = lagrange_basis_values(xi, self.gll_nodes)
+        elem_coeffs = coeffs[iy, ix]
+
+        return np.einsum('...ij,...i,...j->...', elem_coeffs, eta_basis, xi_basis)
 
     def integrate(self, q):
         return (q * self.weights * abs(self.J)).sum()

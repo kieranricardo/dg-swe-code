@@ -109,6 +109,24 @@ def lagrange(N, i, x, xi):
     return fac
 
 
+def lagrange_basis_values(x, xi):
+    """
+    Evaluate all nodal Lagrange basis functions with nodes xi at x.
+    """
+    x = np.asarray(x)
+    xi = np.asarray(xi)
+
+    x_flat = x.reshape(-1)
+    basis = np.ones((x_flat.size, xi.size), dtype=np.result_type(x, xi, float))
+
+    for i in range(xi.size):
+        for j in range(xi.size):
+            if i != j:
+                basis[:, i] *= (x_flat - xi[j]) / (xi[i] - xi[j])
+
+    return basis.reshape(x.shape + (xi.size,))
+
+
 def lagrange1st(N, xi):
     """
     # Calculation of 1st derivatives of Lagrange polynomials

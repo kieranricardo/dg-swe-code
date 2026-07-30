@@ -1,13 +1,48 @@
 import numpy as np
 
 
+FACE_NAMES = ['zp', 'zn', 'xp', 'xn', 'yp', 'yn']
+
+
+def lat_long_to_cartesian(lat, long, radius=1.0):
+    lat, long = np.broadcast_arrays(lat, long)
+    r_cos_lat = radius * np.cos(lat)
+
+    x = r_cos_lat * np.sin(long)
+    y = -r_cos_lat * np.cos(long)
+    z = radius * np.sin(lat)
+
+    return x, y, z
+
+
+def face_name_from_cartesian(x, y, z):
+    x, y, z = np.broadcast_arrays(x, y, z)
+
+    abs_x = np.abs(x)
+    abs_y = np.abs(y)
+    abs_z = np.abs(z)
+
+    out = np.empty(x.shape, dtype='<U2')
+    z_mask = (abs_z >= abs_x) & (abs_z >= abs_y)
+    x_mask = (~z_mask) & (abs_x >= abs_y)
+    y_mask = ~(z_mask | x_mask)
+
+    out[z_mask & (z >= 0)] = 'zp'
+    out[z_mask & (z < 0)] = 'zn'
+    out[x_mask & (x >= 0)] = 'xp'
+    out[x_mask & (x < 0)] = 'xn'
+    out[y_mask & (y >= 0)] = 'yp'
+    out[y_mask & (y < 0)] = 'yn'
+
+    return out
+
+
 class BaseFace:
 
     def __init__(self, name, radius):
         self.radius = radius
-        valid_names = ['zp', 'zn', 'xp', 'xn', 'yp', 'yn']
-        if not name in valid_names:
-            raise ValueError(f'name: expected one of: {valid_names}. Found {name}.')
+        if not name in FACE_NAMES:
+            raise ValueError(f'name: expected one of: {FACE_NAMES}. Found {name}.')
         self.name = name
         self._connections = None
 
@@ -32,6 +67,9 @@ class BaseFace:
         return lat_vec_x, lat_vec_y, lat_vec_z, long_vec_x, long_vec_y, long_vec_z
 
     def to_cartesian(self, x1, y1):
+        raise NotImplementedError
+
+    def to_cubed_sphere(self, x, y, z):
         raise NotImplementedError
 
     def covariant_basis(self, x1, y1):
@@ -135,6 +173,33 @@ class EquiangularFace(BaseFace):
             raise RuntimeError
 
         return self.radius * x, self.radius * y, self.radius * z
+
+    def to_cubed_sphere(self, x, y, z):
+        x, y, z = np.broadcast_arrays(x / self.radius, y / self.radius, z / self.radius)
+        scale = 2 / np.pi
+
+        if self.name == 'zp':
+            x1 = np.arctan2(x, z)
+            y1 = np.arctan2(y, z)
+        elif self.name == 'zn':
+            x1 = np.arctan2(y, -z)
+            y1 = np.arctan2(x, -z)
+        elif self.name == 'xp':
+            x1 = np.arctan2(y, x)
+            y1 = np.arctan2(z, x)
+        elif self.name == 'xn':
+            x1 = np.arctan2(z, -x)
+            y1 = np.arctan2(y, -x)
+        elif self.name == 'yp':
+            x1 = np.arctan2(z, y)
+            y1 = np.arctan2(x, y)
+        elif self.name == 'yn':
+            x1 = np.arctan2(x, -y)
+            y1 = np.arctan2(z, -y)
+        else:
+            raise RuntimeError
+
+        return scale * x1, scale * y1
 
     def covariant_basis(self, x1, y1):
 
