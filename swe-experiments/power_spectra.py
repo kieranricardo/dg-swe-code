@@ -53,9 +53,16 @@ solver = DGCubedSphereSWE(
 )
 
 
-fn_template = get_fn_template(720)
+# fn_template = get_fn_template(720)
+# print('Loading', fn_template)
+# solver.load_restart(fn_template, 'data')
+
+day = 16
+exp_name = f'DG_res_6x{nx}x{ny}'
+fn_template = f"{exp_name}_day_{day}.npy"
 print('Loading', fn_template)
-solver.load_restart(fn_template, 'data')
+solver.load_restart(fn_template, '/Users/u5824685/Documents/repos/dg-tswe-paper/tswe-experiments/data')
+
 
 lat = {n: f.geometry.lat_long(f.xs, f.ys, f.zs)[0] + 0.5 * np.pi for n, f in solver.faces.items()}
 lon = {n: f.geometry.lat_long(f.xs, f.ys, f.zs)[1] for n, f in solver.faces.items()}
