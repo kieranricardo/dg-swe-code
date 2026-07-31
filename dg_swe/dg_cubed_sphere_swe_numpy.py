@@ -484,6 +484,9 @@ class DGCubedSphereSWENumpy:
             )
             for name in self.active_face_names
         }
+        if self.parallel:
+            self._init_mpi_boundary_exchange()
+
         self.time = 0
         self.cdt = min(self.faces[n].cdt for n in self.active_face_names)
         self.flag = True
@@ -498,6 +501,14 @@ class DGCubedSphereSWENumpy:
 
     @staticmethod
     def _get_comm(comm, nprocx, nprocy):
+        if comm is not None:
+            return comm
+        mpi_world_size = max(
+            int(os.environ.get(name, "1"))
+            for name in ("OMPI_COMM_WORLD_SIZE", "PMI_SIZE", "PMIX_SIZE", "MPI_LOCALNRANKS")
+        )
+        if nprocx * nprocy == 1 and mpi_world_size == 1:
+            return None
         try:
             from mpi4py import MPI
             return MPI.COMM_WORLD
@@ -518,6 +529,37 @@ class DGCubedSphereSWENumpy:
     @property
     def y_proc_idx(self):
         return (self.rank - self.tile_idx * self.nprocx * self.nprocy) % self.nprocy
+
+    def _side_connection(self, side):
+        face = self.faces[self.face_name]
+        for name, (i1, i2) in face.connections:
+            if i1 == side:
+                return name, i2
+        raise ValueError(f"No cubed-sphere connection for side {side}.")
+
+    @property
+    def prev_procx(self):
+        if self.x_proc_idx == 0:
+            return self.get_proc(self._side_connection(2), self.y_proc_idx)
+        return self.rank - self.nprocy
+
+    @property
+    def next_procx(self):
+        if self.x_proc_idx == self.nprocx - 1:
+            return self.get_proc(self._side_connection(0), self.y_proc_idx)
+        return self.rank + self.nprocy
+
+    @property
+    def prev_procy(self):
+        if self.y_proc_idx == 0:
+            return self.get_proc(self._side_connection(3), self.x_proc_idx)
+        return self.rank - 1
+
+    @property
+    def next_procy(self):
+        if self.y_proc_idx == self.nprocy - 1:
+            return self.get_proc(self._side_connection(1), self.x_proc_idx)
+        return self.rank + 1
 
     def get_proc(self, conn, tang_idx):
         name, bdry_code = conn
@@ -547,9 +589,8 @@ class DGCubedSphereSWENumpy:
             self.set_vort(sol)
 
         if self.parallel:
-            print('in boundaries 1')
-            self._exchange_boundaries_mpi(sol)
-            print('in boundaries 2')
+            reqs = self.fill_boundaries(sol)
+            self.recv_boundaries(reqs)
             return
 
         for name in self.active_face_names:
@@ -563,18 +604,6 @@ class DGCubedSphereSWENumpy:
                 u, v, w, h = sol[n]
                 vort = neighbour.vort
                 self._assign_edge_state(face, i1, self._edge_state(neighbour, (u, v, w, h), i2))
-
-    @staticmethod
-    def _connection_for_side(face, side):
-        for conn in face.connections:
-            _, (i1, _) = conn
-            if i1 == side:
-                return conn
-        raise ValueError(f"No cubed-sphere connection for side {side}.")
-
-    @staticmethod
-    def _opposite_side(side):
-        return {0: 2, 1: 3, 2: 0, 3: 1}[side]
 
     @staticmethod
     def _edge_state(face, state, side):
@@ -591,6 +620,37 @@ class DGCubedSphereSWENumpy:
         else:
             raise ValueError(f"Unknown boundary side {side}.")
         return np.ascontiguousarray(np.stack(data))
+
+    @staticmethod
+    def _pack_edge_state(face, state, side, out):
+        u, v, w, h = state
+        vort = face.vort
+        if side == 0:
+            out[0] = u[:, -1, :, -1]
+            out[1] = v[:, -1, :, -1]
+            out[2] = w[:, -1, :, -1]
+            out[3] = h[:, -1, :, -1]
+            out[4] = vort[:, -1, :, -1]
+        elif side == 1:
+            out[0] = u[-1, :, -1]
+            out[1] = v[-1, :, -1]
+            out[2] = w[-1, :, -1]
+            out[3] = h[-1, :, -1]
+            out[4] = vort[-1, :, -1]
+        elif side == 2:
+            out[0] = u[:, 0, :, 0]
+            out[1] = v[:, 0, :, 0]
+            out[2] = w[:, 0, :, 0]
+            out[3] = h[:, 0, :, 0]
+            out[4] = vort[:, 0, :, 0]
+        elif side == 3:
+            out[0] = u[0, :, 0]
+            out[1] = v[0, :, 0]
+            out[2] = w[0, :, 0]
+            out[3] = h[0, :, 0]
+            out[4] = vort[0, :, 0]
+        else:
+            raise ValueError(f"Unknown boundary side {side}.")
 
     @staticmethod
     def _assign_edge_state(face, side, data):
@@ -622,49 +682,82 @@ class DGCubedSphereSWENumpy:
         else:
             raise ValueError(f"Unknown boundary side {side}.")
 
-    def _neighbor_rank(self, face, side):
-        if side == 0:
-            if self.x_proc_idx < self.nprocx - 1:
-                return self.rank + self.nprocy
-            conn = self._connection_for_side(face, side)
-            return self.get_proc((conn[0], conn[1][1]), self.y_proc_idx)
-        elif side == 2:
-            if self.x_proc_idx > 0:
-                return self.rank - self.nprocy
-            conn = self._connection_for_side(face, side)
-            return self.get_proc((conn[0], conn[1][1]), self.y_proc_idx)
-        elif side == 1:
-            if self.y_proc_idx < self.nprocy - 1:
-                return self.rank + 1
-            conn = self._connection_for_side(face, side)
-            return self.get_proc((conn[0], conn[1][1]), self.x_proc_idx)
-        elif side == 3:
-            if self.y_proc_idx > 0:
-                return self.rank - 1
-            conn = self._connection_for_side(face, side)
-            return self.get_proc((conn[0], conn[1][1]), self.x_proc_idx)
-        else:
-            raise ValueError(f"Unknown boundary side {side}.")
-
-    def _exchange_boundaries_mpi(self, sol):
+    def _init_mpi_boundary_exchange(self):
         face = self.faces[self.face_name]
-        state = sol[self.face_name]
-        reqs = []
-        recv_edges = []
-        send_edges = []
-        for side in (0, 1, 2, 3):
-            peer = self._neighbor_rank(face, side)
-            send = self._edge_state(face, state, side)
-            recv = np.empty_like(send)
-            send_edges.append(send)
-            recv_edges.append((side, recv))
-            reqs.append(self.comm.Irecv(recv, source=peer, tag=self._opposite_side(side)))
-            reqs.append(self.comm.Isend(send, dest=peer, tag=side))
+        nvars = 5
+        dtype = face.dtype
 
+        self.right_boundary_x = np.zeros((nvars, face.ny, face.n), dtype=dtype)
+        self.left_boundary_x = np.zeros_like(self.right_boundary_x)
+        self.right_boundary_x_send = np.zeros_like(self.right_boundary_x)
+        self.left_boundary_x_send = np.zeros_like(self.right_boundary_x)
+
+        self.right_boundary_y = np.zeros((nvars, face.nx, face.n), dtype=dtype)
+        self.left_boundary_y = np.zeros_like(self.right_boundary_y)
+        self.right_boundary_y_send = np.zeros_like(self.right_boundary_y)
+        self.left_boundary_y_send = np.zeros_like(self.right_boundary_y)
+
+        self.req_right_boundary_x_send = self.comm.Send_init(self.right_boundary_x_send, dest=self.next_procx)
+        self.req_right_boundary_x_recv = self.comm.Recv_init(self.right_boundary_x, source=self.next_procx)
+        self.req_left_boundary_x_send = self.comm.Send_init(self.left_boundary_x_send, dest=self.prev_procx)
+        self.req_left_boundary_x_recv = self.comm.Recv_init(self.left_boundary_x, source=self.prev_procx)
+
+        self.req_right_boundary_y_send = self.comm.Send_init(self.right_boundary_y_send, dest=self.next_procy)
+        self.req_right_boundary_y_recv = self.comm.Recv_init(self.right_boundary_y, source=self.next_procy)
+        self.req_left_boundary_y_send = self.comm.Send_init(self.left_boundary_y_send, dest=self.prev_procy)
+        self.req_left_boundary_y_recv = self.comm.Recv_init(self.left_boundary_y, source=self.prev_procy)
+
+    def fill_right_boundary_x(self, sol):
+        face = self.faces[self.face_name]
+        self._pack_edge_state(face, sol[self.face_name], 0, self.right_boundary_x_send)
+        self.req_right_boundary_x_recv.Start()
+        self.req_right_boundary_x_send.Start()
+        return self.req_right_boundary_x_recv
+
+    def fill_left_boundary_x(self, sol):
+        face = self.faces[self.face_name]
+        self._pack_edge_state(face, sol[self.face_name], 2, self.left_boundary_x_send)
+        self.req_left_boundary_x_recv.Start()
+        self.req_left_boundary_x_send.Start()
+        return self.req_left_boundary_x_recv
+
+    def fill_right_boundary_y(self, sol):
+        face = self.faces[self.face_name]
+        self._pack_edge_state(face, sol[self.face_name], 1, self.right_boundary_y_send)
+        self.req_right_boundary_y_recv.Start()
+        self.req_right_boundary_y_send.Start()
+        return self.req_right_boundary_y_recv
+
+    def fill_left_boundary_y(self, sol):
+        face = self.faces[self.face_name]
+        self._pack_edge_state(face, sol[self.face_name], 3, self.left_boundary_y_send)
+        self.req_left_boundary_y_recv.Start()
+        self.req_left_boundary_y_send.Start()
+        return self.req_left_boundary_y_recv
+
+    def fill_boundaries(self, sol):
+        reqs = [
+            self.fill_left_boundary_x(sol),
+            self.fill_right_boundary_x(sol),
+            self.fill_left_boundary_y(sol),
+            self.fill_right_boundary_y(sol),
+            self.req_right_boundary_x_send,
+            self.req_left_boundary_x_send,
+            self.req_right_boundary_y_send,
+            self.req_left_boundary_y_send,
+        ]
+        return reqs
+
+    def recv_boundaries(self, reqs):
         for req in reqs:
-            req.Wait()
-        for side, recv in recv_edges:
-            self._assign_edge_state(face, side, recv)
+            if req is not None:
+                req.Wait()
+
+        face = self.faces[self.face_name]
+        self._assign_edge_state(face, 2, self.left_boundary_x)
+        self._assign_edge_state(face, 0, self.right_boundary_x)
+        self._assign_edge_state(face, 3, self.left_boundary_y)
+        self._assign_edge_state(face, 1, self.right_boundary_y)
 
     def get_dt(self):
         return min(face.get_dt() for face in self.faces.values())
