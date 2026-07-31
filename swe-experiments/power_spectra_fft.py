@@ -7,7 +7,7 @@ import pickle
 
 plt.rcParams['font.size'] = '14'
 
-compute = True
+compute = False
 eps = 0.8
 g = 9.80616 / 250
 f = 7.292e-5
@@ -29,17 +29,6 @@ nx = ny = 64
 max_n = 400
 nlat = max(4 * max_n + 1, 2 * (ny - 1) * (poly_order + 1) + 1)
 nlon = max(8 * max_n + 2, 4 * (nx - 1) * (poly_order + 1) + 2)
-# day = 16
-# exp_name = f'DG_res_6x{nx}x{ny}'
-# data_dir = os.environ.get(
-#     'SWE_DATA_DIR',
-#     '/Users/u5824685/Documents/repos/dg-tswe-paper/tswe-experiments/data'
-# )
-
-data_dir = os.environ.get(
-    'SWE_DATA_DIR',
-    'data'
-)
 
 def get_fn_template(day):
     suffix = ''
@@ -55,6 +44,20 @@ def get_fn_template(day):
         raise ValueError(f'suffix: expected one of 3000, 4000. Found {s_0}.')
 
     return f"reduced_williamson_5_day_{day}_nx{nx}_p{poly_order}_{suffix}.npy"
+
+
+# day = 16
+# exp_name = f'DG_res_tang_diss_6x{nx}x{ny}'
+# fn_template = f"{exp_name}_day_{day}.npy"
+# out_name = 'galewsky'
+
+fn_template = get_fn_template(1080)
+out_name = 'reduced_willamson_5'
+
+data_dir = os.environ.get(
+    'SWE_DATA_DIR',
+    'data'
+)
 
 
 def make_latlon_grid(nlat, nlon):
@@ -173,13 +176,13 @@ def plot_spectra(ke_spectrum, enstrophy_spectrum, fn_template):
     fig, axes = plt.subplots(1, 2, figsize=(12, 5), constrained_layout=True)
 
     axes[0].semilogy(ke_spectrum)
-    add_reference_line(axes[0], ke_spectrum, 45, -5/3, r'$n^{-5/3}$')
-    # add_reference_line(axes[0], ke_spectrum, 120, -3.0, r'$n^{-3}$')
+    # add_reference_line(axes[0], ke_spectrum, 30, -5/3, r'$n^{-5/3}$')
+    add_reference_line(axes[0], ke_spectrum, 75, -3.0, r'$n^{-3}$')
     axes[0].set_title('Kinetic energy')
     axes[0].set_ylabel('Power')
 
     axes[1].semilogy(enstrophy_spectrum)
-    add_reference_line(axes[1], enstrophy_spectrum, 75, -1.0, r'$n^{-1}$')
+    add_reference_line(axes[1], enstrophy_spectrum, 100, -1.0, r'$n^{-1}$')
     axes[1].set_title('Enstrophy')
     axes[1].set_ylabel('Power')
 
@@ -188,7 +191,7 @@ def plot_spectra(ke_spectrum, enstrophy_spectrum, fn_template):
         ax.set_xlabel('Spherical wavenumber')
         ax.legend()
 
-    fp = os.path.join('plots', f'reduce_willamson_5_ke_enstrophy_spectra.png')
+    fp = os.path.join('plots', f'{out_name}_ke_enstrophy_spectra.png')
     fig.savefig(fp)
     plt.show()
 
@@ -206,9 +209,8 @@ def main():
         dtype=np.float64, tangent_diss=tangent_diss
     )
     
-    fn_template = get_fn_template(1080)
-    # fn_template = f"{exp_name}_day_{day}.npy"
-    # fp = os.path.join('data', f'{fn_template}_ke_enstrophy_spectra_fft_n{max_n}_nlat{nlat}_nlon{nlon}.pkl')
+    
+    fp = os.path.join('data', f'{fn_template}_ke_enstrophy_spectra_fft_n{max_n}_nlat{nlat}_nlon{nlon}.pkl')
     
     if compute:
         print('Loading', fn_template)
@@ -225,14 +227,14 @@ def main():
         print('Computing enstrophy spherical harmonic coefficients with longitude FFT')
         enstrophy_coeffs = spherical_harmonic_coefficients_fft(enstrophy, colat, mu_weights, max_n)
 
-    #     with open(fp, 'wb') as file:
-    #         pickle.dump({'ke': ke_coeffs, 'enstrophy': enstrophy_coeffs}, file, pickle.HIGHEST_PROTOCOL)
+        with open(fp, 'wb') as file:
+            pickle.dump({'ke': ke_coeffs, 'enstrophy': enstrophy_coeffs}, file, pickle.HIGHEST_PROTOCOL)
 
-    # with open(fp, 'rb') as file:
-    #     coeffs = pickle.load(file)
+    with open(fp, 'rb') as file:
+        coeffs = pickle.load(file)
 
-    ke_spectrum = spectrum_from_coeffs(ke_coeffs)
-    enstrophy_spectrum = spectrum_from_coeffs(enstrophy_coeffs)
+    ke_spectrum = spectrum_from_coeffs(coeffs['ke'])
+    enstrophy_spectrum = spectrum_from_coeffs(coeffs['enstrophy'])
     plot_spectra(ke_spectrum, enstrophy_spectrum, fn_template)
 
 

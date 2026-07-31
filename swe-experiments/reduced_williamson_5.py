@@ -4,17 +4,21 @@ from scipy.stats import linregress
 from dg_swe.dg_cubed_sphere_swe_numpy import DGCubedSphereSWENumpy
 import os
 import time
+from mpi4py import MPI
 
 if not os.path.exists('./plots'): os.makedirs('./plots')
 if not os.path.exists('./data'): os.makedirs('./data')
 
 plt.rcParams['font.size'] = '12'
 
-mode = 'restart'
+comm = MPI.COMM_WORLD
+rank = comm.Get_rank()
+
+mode = 'run'
 i_start = 720
 dev = 'cpu'
 
-eps = 0.8 * 2
+eps = 1.6
 tangent_diss = True
 h_diss = True
 
@@ -29,7 +33,7 @@ f = 7.292e-5
 radius = 6.37122e6
 u_0 = 0.5
 h_0 = 5960.0
-s_0 = 4000
+s_0 = 3000
 
 def get_fn_template(day, tangent_diss):
     suffix = ''
@@ -104,7 +108,7 @@ def plot_orography(idx):
     im = solver.latlong_triangular_plot(ax, vmin=vmin, vmax=vmax, plot_func=lambda s: s.b, n=n)
     plt.colorbar(im[0])
 
-    print('b min max:', min(f.b.min() for f in solver.faces.values()), max(f.b.max() for f in solver.faces.values()))
+    # print('b min max:', min(f.b.min() for f in solver.faces.values()), max(f.b.max() for f in solver.faces.values()))
 
     plt.savefig(f'./plots/williamson_5_orography.png')
 
@@ -118,29 +122,32 @@ solver = DGCubedSphereSWENumpy(
 for face in solver.faces.values():
     face.set_initial_condition(*initial_condition(face))
 
-print('Initial dt:', solver.get_dt())
+dt = 1800 * eps * (32 / nx)
+if rank == 0:
+    print('Initial dt:', dt)
 
 if mode == 'run':
     t0 = time.time()
-    for i in range(100):
-        print('\nRunning day', i + 1)
+    for i in range(1080):
+        if rank == 0:
+            print('Running day', i + 1)
         tend = solver.time + 3600 * 24
-        print('h min max:', min(f.h.min() for f in solver.faces.values()), max(f.h.max() for f in solver.faces.values()), solver.get_dt())
+        #print('h min max:', min(f.h.min() for f in solver.faces.values()), max(f.h.max() for f in solver.faces.values()), solver.get_dt())
         is_nan = any(np.isnan(f.h).any() for f in solver.faces.values())
         if is_nan:
             print(f'NaN at day {i + 1}.')
             break
         while solver.time < tend:
-            dt = solver.get_dt()
-            dt = min(dt, tend - solver.time)
-            solver.time_step(dt=dt, order=34)
+            solver.time_step(dt=min(dt, tend - solver.time), order=34)
 
         if ((i + 1) % 20 == 0):
             fn_template = get_fn_template(i + 1, tangent_diss)
-            print('Saving:', fn_template)
+            if rank == 0:
+                print('Saving:', fn_template)
             solver.save_restart(fn_template, 'data')
     t1 = time.time()
-    print('Wall time for 1 day:', (t1 - t0) / 20)
+    # if rank == 0:
+    #     print('Wall time for 1 day:', (t1 - t0) / 20, '\n')
 
 if mode == 'restart':
 
@@ -157,9 +164,7 @@ if mode == 'restart':
             print(f'NaN at day {i+1}.')
             break
         while solver.time < tend:
-            dt = solver.get_dt()
-            dt = min(dt, tend - solver.time)
-            solver.time_step(dt=dt, order=34)
+            solver.time_step(dt=min(dt, tend - solver.time), order=34)
 
         if ((i + 1) % 1 == 0):
             fn_template = get_fn_template(i + 1, tangent_diss)

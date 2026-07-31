@@ -1,20 +1,25 @@
 from matplotlib import pyplot as plt
-from dg_swe.dg_cubed_sphere_swe import DGCubedSphereSWE
+from dg_swe.dg_cubed_sphere_swe_numpy import DGCubedSphereSWENumpy
 from dg_swe.utils import Interpolate
 import numpy as np
 import scipy
 import os
+import time
+from mpi4py import MPI
 
 if not os.path.exists('./plots'): os.makedirs('./plots')
 if not os.path.exists('./data'): os.makedirs('./data')
 
+comm = MPI.COMM_WORLD
+rank = comm.Get_rank()
+
 plt.rcParams['font.size'] = '12'
 
-mode = 'plot'
+mode = 'run'
 dev = 'cpu'
 
-nx = ny = 15
-eps = 0.8
+nx = ny = 64
+eps = 1.3
 g = 9.80616
 f = 7.292e-5
 radius = 6.37122e6
@@ -69,34 +74,45 @@ def initial_condition(face):
 
 if mode == 'run':
 
-    exp_names = [f'DG_res_6x{nx}x{ny}', f'DG_cntr_res_6x{nx}x{ny}'][:1]
+    exp_names = [f'DG_res_tang_diss_6x{nx}x{ny}', f'DG_cntr_res_6x{nx}x{ny}'][:1]
 
     for exp in exp_names:
         if 'cntr' in exp:
             a = 0.0
         else:
             a = 0.5
-        solver = DGCubedSphereSWE(
+
+        solver = DGCubedSphereSWENumpy(
             poly_order, nx, ny, g, f,
             eps, device=dev, solution=None, a=a, radius=radius,
-            dtype=np.float64, tangent_diss=True
+            dtype=np.float64, tangent_diss=True, ah=0.0
         )
         for face in solver.faces.values():
             face.set_initial_condition(*initial_condition(face))
-
         solver.boundaries()
-        print('Time step:', solver.get_dt())
-        print('Starting', exp)
-        print('a:', solver.faces['zp'].a, 'res:', nx, ny)
 
-        for i in range(10):
-            print('Running day', i)
+        dt = 130 * (15 / nx) * (eps / 0.8)
+
+        if rank == 0:
+            print('Time step:', dt)
+            print('Starting', exp)
+            print('a:', solver.faces['zp'].a, 'res:', nx, ny)
+
+        for i in range(20):
+            if rank == 0:
+                print('Running day', i)
             tend = solver.time + 3600 * 24
-            while solver.time < tend:
-                dt = solver.get_dt()
-                dt = min(dt, tend - solver.time)
-                solver.time_step(dt=dt)
 
+            solver.time_step(dt=min(dt, tend - solver.time))
+            t0 = time.time()
+            while solver.time < tend:
+                solver.time_step(dt=min(dt, tend - solver.time))
+
+            t1 = time.time()
+            if rank == 0:
+                print('Walltime:', t1 - t0, 's')
+
+            comm.Barrier()
             fn_template = f"{exp}_day_{i+1}.npy"
             solver.save_restart(fn_template, 'data')
 
@@ -104,7 +120,7 @@ if mode == 'run':
 
 elif mode == 'plot':
 
-    solver = DGCubedSphereSWE(
+    solver = DGCubedSphereSWENumpy(
         poly_order, nx, ny, g, f,
         eps, device=dev, solution=None, a=0.5, radius=radius,
         dtype=np.float64, damping='adaptive'
@@ -114,7 +130,7 @@ elif mode == 'plot':
     E0 = solver.integrate(solver.entropy())
 
     p = 12
-    solver_hr = DGCubedSphereSWE(
+    solver_hr = DGCubedSphereSWENumpy(
         p, nx, ny, g, f,
         eps, device=dev, solution=None, a=0.5, radius=radius,
         dtype=np.float64, damping='adaptive'
