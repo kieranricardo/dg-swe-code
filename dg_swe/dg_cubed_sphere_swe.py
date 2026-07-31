@@ -16,8 +16,8 @@ def _to_numpy(arr):
 class DGCubedSphereSWE:
     def __init__(
             self, poly_order, nx, ny, g, f, eps, radius=1.0, device='cpu',
-            solution=None, a=0.0, ah=0.0, dtype=np.float32, damping=None,
-            tau_func=lambda t, dt: t, tau=0, tangent_diss=False, **kwargs):
+            solution=None, a=0.0, ah=0.0, dtype=np.float64,
+              tangent_diss=False, **kwargs):
 
         self.face_names = ['zp', 'zn', 'xp', 'xn', 'yp', 'yn']
         self.faces = {
@@ -29,8 +29,6 @@ class DGCubedSphereSWE:
         }
         self.time = 0
         self.cdt = min(self.faces[n].cdt for n in self.face_names)
-        self.damping = damping
-        self.tau_func = tau_func
         self.flag = True
         self.tangent_diss = tangent_diss
 
@@ -464,8 +462,7 @@ class DGCubedSphereFace:
 
     def __init__(
             self, name, poly_order, nx, ny, g, f, radius, eps, device='cpu',
-            solution=None, a=0.0, ah=0.0, dtype=np.float32, damping=None,
-            tau_func=lambda t, dt: t, bc='wall', tau=0.0, tangent_diss=False, **kwargs):
+            solution=None, a=0.0, ah=0.0, dtype=np.float64, bc='wall', tangent_diss=False, **kwargs):
 
         valid_names = ['zp', 'zn', 'xp', 'xn', 'yp', 'yn']
         if not name in valid_names:
@@ -483,8 +480,6 @@ class DGCubedSphereFace:
         self.ah = ah
         self.solution = solution
         self.dtype = dtype
-        self.damping = damping
-        self.tau_func = tau_func
         self.xperiodic = self.yperiodic = False
         self.bc = bc
         self.geometry = EquiangularFace(name, radius=radius)

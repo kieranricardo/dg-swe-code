@@ -448,9 +448,8 @@ else:
 class DGCubedSphereSWENumpy:
     def __init__(
             self, poly_order, nx, ny, g, f, eps, radius=1.0, device='cpu',
-            solution=None, a=0.0, ah=0.0, dtype=np.float32, damping=None,
-            tau_func=lambda t, dt: t, tau=0, tangent_diss=False,
-            nprocx=1, nprocy=1, comm=None, **kwargs):
+            solution=None, a=0.0, ah=0.0, dtype=np.float64,
+            tangent_diss=False, nprocx=1, nprocy=1, comm=None, **kwargs):
 
         self.face_names = ['zp', 'zn', 'xp', 'xn', 'yp', 'yn']
         self.nprocx = nprocx
@@ -477,7 +476,7 @@ class DGCubedSphereSWENumpy:
         self.faces = {
             name: DGCubedSphereFaceNumpy(
                 name, poly_order, nx, ny, g, f, radius, eps, device, a=a, ah=ah, dtype=dtype,
-                damping=None, bc='', tau=tau, tangent_diss=tangent_diss,
+                bc='', tangent_diss=tangent_diss,
                 x_proc_idx=self.x_proc_idx if self.parallel else 0,
                 y_proc_idx=self.y_proc_idx if self.parallel else 0,
                 nprocx=self.nprocx if self.parallel else 1,
@@ -487,8 +486,6 @@ class DGCubedSphereSWENumpy:
         }
         self.time = 0
         self.cdt = min(self.faces[n].cdt for n in self.active_face_names)
-        self.damping = damping
-        self.tau_func = tau_func
         self.flag = True
         self.tangent_diss = tangent_diss
 
@@ -501,15 +498,14 @@ class DGCubedSphereSWENumpy:
 
     @staticmethod
     def _get_comm(comm, nprocx, nprocy):
-        if comm is not None:
-            return comm
-        if nprocx * nprocy == 1:
-            return None
         try:
             from mpi4py import MPI
+            return MPI.COMM_WORLD
         except ImportError as exc:
+            if nprocx * nprocy == 1:
+                return None
             raise ImportError("mpi4py is required when nprocx*nprocy > 1.") from exc
-        return MPI.COMM_WORLD
+        
 
     @property
     def nproc(self):
@@ -551,7 +547,9 @@ class DGCubedSphereSWENumpy:
             self.set_vort(sol)
 
         if self.parallel:
+            print('in boundaries 1')
             self._exchange_boundaries_mpi(sol)
+            print('in boundaries 2')
             return
 
         for name in self.active_face_names:
@@ -1011,9 +1009,10 @@ class DGCubedSphereFaceNumpy:
 
     def __init__(
             self, name, poly_order, nx, ny, g, f, radius, eps, device='cpu',
-            solution=None, a=0.0, ah=0.0, dtype=np.float32, damping=None,
-            tau_func=lambda t, dt: t, bc='wall', tau=0.0, tangent_diss=False,
-            x_proc_idx=0, y_proc_idx=0, nprocx=1, nprocy=1, **kwargs):
+            solution=None, a=0.0, ah=0.0, dtype=np.float64, bc='wall', 
+            tangent_diss=False, x_proc_idx=0, y_proc_idx=0, nprocx=1, nprocy=1, 
+            **kwargs
+        ):
 
         valid_names = ['zp', 'zn', 'xp', 'xn', 'yp', 'yn']
         if not name in valid_names:
@@ -1031,13 +1030,10 @@ class DGCubedSphereFaceNumpy:
         self.ah = ah
         self.solution = solution
         self.dtype = dtype
-        self.damping = damping
-        self.tau_func = tau_func
         self.xperiodic = self.yperiodic = False
         self.bc = bc
         self.geometry = EquiangularFace(name, radius=radius)
         self.connections = self.geometry.connections
-        self.tau = tau
         self.tangent_diss = tangent_diss
 
         [xs_1d, w_x] = gll(poly_order, iterative=True)
