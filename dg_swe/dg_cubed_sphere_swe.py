@@ -23,7 +23,7 @@ class DGCubedSphereSWE:
         self.faces = {
             name: DGCubedSphereFace(
                 name, poly_order, nx, ny, g, f, radius, eps, device, a=a, ah=ah, dtype=dtype,
-                damping=None, bc='', tau=tau, tangent_diss=tangent_diss
+                damping=None, bc='', tangent_diss=tangent_diss
             )
             for name in self.face_names
         }
@@ -484,7 +484,6 @@ class DGCubedSphereFace:
         self.bc = bc
         self.geometry = EquiangularFace(name, radius=radius)
         self.connections = self.geometry.connections
-        self.tau = tau
         self.tangent_diss = tangent_diss
 
         [xs_1d, w_x] = gll(poly_order, iterative=True)
