@@ -1,6 +1,9 @@
-import numpy as np
-from dg_swe.geometry import EquiangularFace, SadournyFace, face_name_from_cartesian, lat_long_to_cartesian
 import os
+from math import comb, factorial
+
+import numpy as np
+
+from dg_swe.geometry import EquiangularFace, SadournyFace, face_name_from_cartesian, lat_long_to_cartesian
 
 try:
     from numba import njit
@@ -21,6 +24,208 @@ def _to_numpy(arr, dtype=None, copy=False):
 
 def _norm_l2(vec):
     return np.sqrt(sum(a * a for a in vec))
+
+
+def _positive_part_power(x, degree):
+    x = np.asarray(x, dtype=float)
+    out = np.zeros_like(x, dtype=float)
+    mask = x > 0.0
+    if degree == 0:
+        out[mask] = 1.0
+    else:
+        out[mask] = x[mask] ** degree
+    return out
+
+
+def centered_cardinal_bspline(x, order, derivative=0):
+    """
+    Centered cardinal B-spline of the requested order.
+
+    ``order`` is degree + 1, so order 1 is the unit box on
+    [-1/2, 1/2] and order 2 is the centered tent function.
+    """
+    if order < 1:
+        raise ValueError(f"order must be positive; found {order}.")
+    if derivative < 0:
+        raise ValueError(f"derivative must be non-negative; found {derivative}.")
+
+    x_arr = np.asarray(x, dtype=float)
+    scalar = x_arr.ndim == 0
+    x_flat = x_arr.reshape(1) if scalar else x_arr
+
+    if derivative >= order:
+        out = np.zeros_like(x_flat, dtype=float)
+    elif derivative > 0:
+        out = np.zeros_like(x_flat, dtype=float)
+        for j in range(derivative + 1):
+            out += (
+                (-1) ** j
+                * comb(derivative, j)
+                * centered_cardinal_bspline(
+                    x_flat + 0.5 * derivative - j, order - derivative
+                )
+            )
+    else:
+        degree = order - 1
+        out = np.zeros_like(x_flat, dtype=float)
+        for j in range(order + 1):
+            out += (
+                (-1) ** j
+                * comb(order, j)
+                * _positive_part_power(x_flat + 0.5 * order - j, degree)
+            )
+        out /= factorial(degree)
+
+    if scalar:
+        return out[0]
+    return out.reshape(x_arr.shape)
+
+
+def _centered_uniform_sum_moments(order, max_degree):
+    moments = np.zeros(max_degree + 1, dtype=float)
+    moments[0] = 1.0
+
+    uniform = np.zeros(max_degree + 1, dtype=float)
+    for degree in range(max_degree + 1):
+        if degree % 2 == 0:
+            uniform[degree] = 1.0 / ((degree + 1) * 2.0 ** degree)
+
+    for _ in range(order):
+        next_moments = np.zeros_like(moments)
+        for degree in range(max_degree + 1):
+            total = 0.0
+            for j in range(degree + 1):
+                total += comb(degree, j) * moments[j] * uniform[degree - j]
+            next_moments[degree] = total
+        moments = next_moments
+
+    return moments
+
+
+def _shifted_bspline_moments(order, shift, max_degree):
+    centered_moments = _centered_uniform_sum_moments(order, max_degree)
+    moments = np.zeros(max_degree + 1, dtype=float)
+    for degree in range(max_degree + 1):
+        total = 0.0
+        for j in range(degree + 1):
+            total += comb(degree, j) * shift ** (degree - j) * centered_moments[j]
+        moments[degree] = total
+    return moments
+
+
+class SIACKernel:
+    def __init__(
+        self,
+        poly_order=None,
+        *,
+        spline_order=None,
+        num_shifts=None,
+        reproduction_degree=None,
+        shifts=None,
+        coeffs=None,
+    ):
+        if spline_order is None:
+            if poly_order is None:
+                raise ValueError("poly_order or spline_order must be provided.")
+            spline_order = poly_order + 1
+
+        if shifts is None:
+            if num_shifts is None:
+                if poly_order is None:
+                    raise ValueError("poly_order, num_shifts, or shifts must be provided.")
+                num_shifts = poly_order
+            shifts = np.arange(-num_shifts, num_shifts + 1, dtype=float)
+        else:
+            shifts = np.asarray(shifts, dtype=float)
+
+        if reproduction_degree is None:
+            reproduction_degree = shifts.size - 1
+
+        if reproduction_degree >= shifts.size:
+            raise ValueError(
+                "reproduction_degree must be less than the number of SIAC shifts; "
+                f"found reproduction_degree={reproduction_degree}, shifts={shifts.size}."
+            )
+
+        self.spline_order = int(spline_order)
+        self.reproduction_degree = int(reproduction_degree)
+        self.shifts = shifts
+
+        if coeffs is None:
+            coeffs = self._solve_coeffs()
+        self.coeffs = np.asarray(coeffs, dtype=float)
+        if self.coeffs.shape != self.shifts.shape:
+            raise ValueError(
+                f"coeffs: expected shape {self.shifts.shape}. Found {self.coeffs.shape}."
+            )
+
+        self._breakpoints = None
+
+    def _solve_coeffs(self):
+        matrix = np.zeros((self.reproduction_degree + 1, self.shifts.size), dtype=float)
+        for col, shift in enumerate(self.shifts):
+            matrix[:, col] = _shifted_bspline_moments(
+                self.spline_order, shift, self.reproduction_degree
+            )
+
+        rhs = np.zeros(self.reproduction_degree + 1, dtype=float)
+        rhs[0] = 1.0
+
+        if matrix.shape[0] == matrix.shape[1]:
+            return np.linalg.solve(matrix, rhs)
+        return np.linalg.lstsq(matrix, rhs, rcond=None)[0]
+
+    def values(self, x, derivative=0):
+        x_arr = np.asarray(x, dtype=float)
+        out = np.zeros_like(x_arr, dtype=float)
+        for coeff, shift in zip(self.coeffs, self.shifts):
+            out += coeff * centered_cardinal_bspline(
+                x_arr - shift, self.spline_order, derivative=derivative
+            )
+        return out
+
+    @property
+    def breakpoints(self):
+        if self._breakpoints is None:
+            knots = []
+            for shift in self.shifts:
+                left = shift - 0.5 * self.spline_order
+                knots.extend(left + np.arange(self.spline_order + 1))
+            self._breakpoints = np.unique(np.round(knots, decimals=14))
+        return self._breakpoints
+
+    def quadrature(self, quadrature_order, derivative=0):
+        if quadrature_order < 1:
+            raise ValueError(f"quadrature_order must be positive; found {quadrature_order}.")
+
+        points_1d, weights_1d = np.polynomial.legendre.leggauss(quadrature_order)
+        points = []
+        weights = []
+        for left, right in zip(self.breakpoints[:-1], self.breakpoints[1:]):
+            if right <= left:
+                continue
+            midpoint = 0.5 * (left + right)
+            half_width = 0.5 * (right - left)
+            interval_points = midpoint + half_width * points_1d
+            interval_weights = half_width * weights_1d * self.values(
+                interval_points, derivative=derivative
+            )
+            points.append(interval_points)
+            weights.append(interval_weights)
+
+        return np.concatenate(points), np.concatenate(weights)
+
+    def cache_key(self):
+        return (
+            self.spline_order,
+            self.reproduction_degree,
+            tuple(np.round(self.shifts, decimals=14)),
+            tuple(np.round(self.coeffs, decimals=14)),
+        )
+
+
+def siac_kernel(poly_order, **kwargs):
+    return SIACKernel(poly_order=poly_order, **kwargs)
 
 
 def gll(N, iterative=True):
@@ -894,6 +1099,253 @@ class DGCubedSphereSWENumpy:
             return coeffs[name]
         return coeffs[self.face_names.index(name)]
 
+    def _coeffs_by_face(self, coeffs):
+        if coeffs is None:
+            return {name: self.faces[name].h for name in self.active_face_names}
+        if isinstance(coeffs, str):
+            return {name: getattr(self.faces[name], coeffs) for name in self.active_face_names}
+        if isinstance(coeffs, dict):
+            return coeffs
+        return {
+            name: coeffs[self.face_names.index(name)]
+            for name in self.active_face_names
+        }
+
+    def evaluate_cartesian(self, x, y, z, coeffs):
+        """
+        Evaluate scalar DG coefficients at Cartesian points on the sphere.
+
+        ``coeffs`` accepts the same forms as ``evaluate_latlong``: a dict keyed
+        by face name, or an array whose first axis follows ``self.face_names``.
+        """
+        x, y, z = np.broadcast_arrays(x, y, z)
+        out = self._evaluate_cartesian_many(x, y, z, [coeffs])[0]
+        return out
+
+    def _evaluate_cartesian_many(self, x, y, z, coeffs_list):
+        if self.parallel:
+            raise NotImplementedError(
+                "Sphere-wide Cartesian evaluation is only available in serial runs."
+            )
+
+        x, y, z = np.broadcast_arrays(x, y, z)
+        out_shape = x.shape
+        x_flat = x.ravel()
+        y_flat = y.ravel()
+        z_flat = z.ravel()
+        face_names = face_name_from_cartesian(x_flat, y_flat, z_flat).ravel()
+
+        coeffs_by_face = [self._coeffs_by_face(coeffs) for coeffs in coeffs_list]
+        outputs = [None for _ in coeffs_list]
+
+        for name in self.active_face_names:
+            mask = face_names == name
+            if not mask.any():
+                continue
+
+            face = self.faces[name]
+            x1, y1 = face.geometry.to_cubed_sphere(x_flat[mask], y_flat[mask], z_flat[mask])
+            for idx, coeffs in enumerate(coeffs_by_face):
+                values = face.evaluate(x1, y1, coeffs[name])
+                if outputs[idx] is None:
+                    outputs[idx] = np.empty(x_flat.shape, dtype=values.dtype)
+                outputs[idx][mask] = values
+
+        for idx, out in enumerate(outputs):
+            if out is None:
+                outputs[idx] = np.empty(x_flat.shape)
+            outputs[idx] = outputs[idx].reshape(out_shape)
+
+        return outputs
+
+    def siac_filter(
+        self,
+        coeffs=None,
+        *,
+        derivative=(0, 0),
+        width=None,
+        scale=1.0,
+        kernel=None,
+        quadrature_order=None,
+        boundary="sphere",
+    ):
+        """
+        Apply a tensor-product SIAC filter to scalar DG coefficients.
+
+        ``boundary="sphere"`` samples through cubed-sphere panel seams in
+        serial. ``boundary="face"`` uses each face's fast local tensor-product
+        matrix path and clips samples at that face's edge.
+        """
+        if kernel is None:
+            kernel = siac_kernel(next(iter(self.faces.values())).poly_order)
+        if quadrature_order is None:
+            quadrature_order = max(next(iter(self.faces.values())).poly_order + 3, 6)
+
+        if boundary == "face":
+            coeffs_by_face = self._coeffs_by_face(coeffs)
+            return {
+                name: face.siac_filter(
+                    coeffs_by_face[name],
+                    derivative=derivative,
+                    width=width,
+                    scale=scale,
+                    kernel=kernel,
+                    quadrature_order=quadrature_order,
+                )
+                for name, face in self.faces.items()
+            }
+        if boundary != "sphere":
+            raise ValueError(
+                f"boundary: expected one of ['sphere', 'face']. Found {boundary}."
+            )
+        return self._siac_filter_sphere(
+            coeffs,
+            derivative=derivative,
+            width=width,
+            scale=scale,
+            kernel=kernel,
+            quadrature_order=quadrature_order,
+        )
+
+    def _siac_filter_sphere(
+        self,
+        coeffs,
+        *,
+        derivative,
+        width,
+        scale,
+        kernel,
+        quadrature_order,
+    ):
+        if self.parallel:
+            raise NotImplementedError(
+                "Sphere-wide SIAC filtering is only available in serial runs. "
+                "Use boundary='face' for local per-rank post-processing."
+            )
+
+        coeffs_by_face = self._coeffs_by_face(coeffs)
+        dx_order, dy_order = derivative
+        out = {}
+
+        for name, face in self.faces.items():
+            Hx, Hy = face._siac_widths(width, scale)
+            x_points, x_weights = kernel.quadrature(
+                quadrature_order, derivative=dx_order
+            )
+            y_points, y_weights = kernel.quadrature(
+                quadrature_order, derivative=dy_order
+            )
+            x_weights = x_weights / Hx ** dx_order
+            y_weights = y_weights / Hy ** dy_order
+
+            filtered = np.zeros(face.x1.shape, dtype=np.result_type(face.dtype, float))
+            for ty, wy in zip(y_points, y_weights):
+                sample_y1 = face.y1 - Hy * ty
+                for tx, wx in zip(x_points, x_weights):
+                    sample_x1 = face.x1 - Hx * tx
+                    x, y, z = face.geometry.to_cartesian(sample_x1, sample_y1)
+                    values = self.evaluate_cartesian(x, y, z, coeffs_by_face)
+                    filtered += wx * wy * values
+            out[name] = filtered.astype(face.dtype, copy=False)
+
+        return out
+
+    def siac_vorticity(
+        self,
+        *,
+        width=None,
+        scale=1.0,
+        kernel=None,
+        quadrature_order=None,
+        boundary="sphere",
+        include_coriolis=True,
+    ):
+        """
+        Compute vorticity using SIAC derivative filters on covariant velocity.
+        """
+        if kernel is None:
+            kernel = siac_kernel(next(iter(self.faces.values())).poly_order)
+        if quadrature_order is None:
+            quadrature_order = max(next(iter(self.faces.values())).poly_order + 3, 6)
+
+        if boundary == "face":
+            return {
+                name: face.siac_vorticity(
+                    width=width,
+                    scale=scale,
+                    kernel=kernel,
+                    quadrature_order=quadrature_order,
+                    include_coriolis=include_coriolis,
+                )
+                for name, face in self.faces.items()
+            }
+        if boundary != "sphere":
+            raise ValueError(
+                f"boundary: expected one of ['sphere', 'face']. Found {boundary}."
+            )
+        if self.parallel:
+            raise NotImplementedError(
+                "Sphere-wide SIAC vorticity is only available in serial runs. "
+                "Use boundary='face' for local per-rank post-processing."
+            )
+
+        out = {}
+        velocity_coeffs = [
+            {name: face.u for name, face in self.faces.items()},
+            {name: face.v for name, face in self.faces.items()},
+            {name: face.w for name, face in self.faces.items()},
+        ]
+
+        for name, face in self.faces.items():
+            Hx, Hy = face._siac_widths(width, scale)
+            x_points, x_filter_weights = kernel.quadrature(quadrature_order, derivative=0)
+            y_points, y_filter_weights = kernel.quadrature(quadrature_order, derivative=0)
+            _, x_derivative_weights = kernel.quadrature(quadrature_order, derivative=1)
+            _, y_derivative_weights = kernel.quadrature(quadrature_order, derivative=1)
+            x_derivative_weights = x_derivative_weights / Hx
+            y_derivative_weights = y_derivative_weights / Hy
+
+            dvy_dx = np.zeros(face.x1.shape, dtype=np.result_type(face.dtype, float))
+            dux_dy = np.zeros_like(dvy_dx)
+
+            for y_idx, ty in enumerate(y_points):
+                sample_y1 = face.y1 - Hy * ty
+                wy = y_filter_weights[y_idx]
+                dwy = y_derivative_weights[y_idx]
+                for x_idx, tx in enumerate(x_points):
+                    sample_x1 = face.x1 - Hx * tx
+                    wx = x_filter_weights[x_idx]
+                    dwx = x_derivative_weights[x_idx]
+
+                    x, y, z = face.geometry.to_cartesian(sample_x1, sample_y1)
+                    u_sample, v_sample, w_sample = self._evaluate_cartesian_many(
+                        x, y, z, velocity_coeffs
+                    )
+                    (
+                        dxdx1,
+                        dxdy1,
+                        _,
+                        dydx1,
+                        dydy1,
+                        _,
+                        dzdx1,
+                        dzdy1,
+                        _,
+                    ) = face.geometry.covariant_basis(sample_x1, sample_y1)
+
+                    u_cov = u_sample * dxdx1 + v_sample * dydx1 + w_sample * dzdx1
+                    v_cov = u_sample * dxdy1 + v_sample * dydy1 + w_sample * dzdy1
+
+                    dvy_dx += dwx * wy * v_cov
+                    dux_dy += wx * dwy * u_cov
+
+            vort = (dvy_dx - dux_dy) / face.local_surface_jacobian()
+            if include_coriolis:
+                vort = vort + face.f
+            out[name] = vort.astype(face.dtype, copy=False)
+
+        return out
+
     def triangular_plot(self, ax, vmin=None, vmax=None, plot_func=None, cmap='nipy_spectral', latlong=False, n=None, lines=False, levels=None):
         data = [plot_func(face).ravel() for face in self.faces.values()]
         if not latlong:
@@ -1174,6 +1626,7 @@ class DGCubedSphereFaceNumpy:
         self.nx = local_nx
         self.ny = local_ny
         self.D = self.l1d.astype(self.dtype, copy=False)
+        self._siac_matrix_cache = {}
 
         dxdx1, dxdy1, dxdz1, dydx1, dydy1, dydz1, dzdx1, dzdy1, dzdz1 = self.geometry.covariant_basis(self.x1, self.y1)
         self.dxdxi = dxdx1.astype(self.dtype, copy=False) * lx / 2
@@ -1471,6 +1924,168 @@ class DGCubedSphereFaceNumpy:
         elem_coeffs = coeffs[iy, ix]
 
         return np.einsum('...ij,...i,...j->...', elem_coeffs, eta_basis, xi_basis)
+
+    def _siac_widths(self, width, scale):
+        if width is None:
+            return scale * self.lx, scale * self.ly
+        if np.isscalar(width):
+            return float(width), float(width)
+        if len(width) != 2:
+            raise ValueError(f"width: expected a scalar or length-2 tuple. Found {width}.")
+        return float(width[0]), float(width[1])
+
+    def _siac_axis_nodes(self, axis):
+        if axis == "x":
+            return self.x1[0, :, 0, :].reshape(-1), self.x_min, self.lx, self.nx
+        if axis == "y":
+            return self.y1[:, 0, :, 0].reshape(-1), self.y_min, self.ly, self.ny
+        raise ValueError(f"axis: expected one of ['x', 'y']. Found {axis}.")
+
+    def _siac_matrix(self, axis, derivative_order, width, kernel, quadrature_order):
+        if derivative_order < 0:
+            raise ValueError(
+                f"derivative_order must be non-negative; found {derivative_order}."
+            )
+        if derivative_order >= kernel.spline_order:
+            raise ValueError(
+                "derivative_order must be less than the SIAC spline order; "
+                f"found derivative_order={derivative_order}, spline_order={kernel.spline_order}."
+            )
+
+        key = (
+            axis,
+            derivative_order,
+            float(width),
+            int(quadrature_order),
+            kernel.cache_key(),
+        )
+        cached = self._siac_matrix_cache.get(key)
+        if cached is not None:
+            return cached
+
+        target_nodes, coord_min, cell_width, num_cells = self._siac_axis_nodes(axis)
+        num_targets = target_nodes.size
+        matrix = np.zeros((num_targets, num_cells * self.n), dtype=self.dtype)
+
+        quad_points, quad_weights = kernel.quadrature(
+            quadrature_order, derivative=derivative_order
+        )
+        quad_weights = quad_weights / width ** derivative_order
+
+        rows = np.arange(num_targets)[:, None]
+        local_cols = np.arange(self.n)[None, :]
+
+        for point, weight in zip(quad_points, quad_weights):
+            sample = np.clip(
+                target_nodes - width * point,
+                coord_min,
+                coord_min + num_cells * cell_width,
+            )
+            elem_coord = (sample - coord_min) / cell_width
+            elem = np.floor(elem_coord).astype(int)
+            elem = np.clip(elem, 0, num_cells - 1)
+            reference = np.clip(2.0 * (elem_coord - elem) - 1.0, -1.0, 1.0)
+            basis = lagrange_basis_values(reference, self.gll_nodes)
+            cols = elem[:, None] * self.n + local_cols
+            np.add.at(matrix, (rows, cols), weight * basis)
+
+        self._siac_matrix_cache[key] = matrix
+        return matrix
+
+    def _apply_siac_matrices(self, coeffs, x_matrix, y_matrix):
+        grid = coeffs.swapaxes(1, 2).reshape(self.ny * self.n, self.nx * self.n)
+        filtered = y_matrix @ grid @ x_matrix.T
+        return filtered.reshape(self.ny, self.n, self.nx, self.n).swapaxes(1, 2)
+
+    def local_covariant_velocity(self, u=None, v=None, w=None):
+        if u is None:
+            u = self.u
+        if v is None:
+            v = self.v
+        if w is None:
+            w = self.w
+
+        dx_dxi_scale = 0.5 * self.lx
+        dy_deta_scale = 0.5 * self.ly
+        u_cov, v_cov, _ = self.phys_to_cov(u, v, w)
+        return u_cov / dx_dxi_scale, v_cov / dy_deta_scale
+
+    def local_surface_jacobian(self):
+        return self.J / (0.25 * self.lx * self.ly)
+
+    def siac_filter(
+        self,
+        coeffs=None,
+        *,
+        derivative=(0, 0),
+        width=None,
+        scale=1.0,
+        kernel=None,
+        quadrature_order=None,
+    ):
+        """
+        Fast face-local tensor-product SIAC filter.
+
+        Samples that would leave this face are clipped to the face edge. Use
+        ``DGCubedSphereSWENumpy.siac_filter(..., boundary="sphere")`` when a
+        serial, seam-aware cubed-sphere filter is needed.
+        """
+        if coeffs is None:
+            coeffs = self.h
+        elif isinstance(coeffs, str):
+            coeffs = getattr(self, coeffs)
+        coeffs = _to_numpy(coeffs, dtype=self.dtype)
+        expected_shape = (self.ny, self.nx, self.n, self.n)
+        if coeffs.shape != expected_shape:
+            raise ValueError(f"coeffs: expected shape {expected_shape}. Found {coeffs.shape}.")
+
+        if kernel is None:
+            kernel = siac_kernel(self.poly_order)
+        if quadrature_order is None:
+            quadrature_order = max(self.poly_order + 3, 6)
+
+        if len(derivative) != 2:
+            raise ValueError(f"derivative: expected a length-2 tuple. Found {derivative}.")
+        dx_order, dy_order = derivative
+        Hx, Hy = self._siac_widths(width, scale)
+
+        x_matrix = self._siac_matrix("x", dx_order, Hx, kernel, quadrature_order)
+        y_matrix = self._siac_matrix("y", dy_order, Hy, kernel, quadrature_order)
+        return self._apply_siac_matrices(coeffs, x_matrix, y_matrix)
+
+    def siac_vorticity(
+        self,
+        *,
+        width=None,
+        scale=1.0,
+        kernel=None,
+        quadrature_order=None,
+        include_coriolis=True,
+    ):
+        """
+        Compute vorticity with SIAC derivative filters on covariant velocity.
+        """
+        u_cov, v_cov = self.local_covariant_velocity()
+        dvy_dx = self.siac_filter(
+            v_cov,
+            derivative=(1, 0),
+            width=width,
+            scale=scale,
+            kernel=kernel,
+            quadrature_order=quadrature_order,
+        )
+        dux_dy = self.siac_filter(
+            u_cov,
+            derivative=(0, 1),
+            width=width,
+            scale=scale,
+            kernel=kernel,
+            quadrature_order=quadrature_order,
+        )
+        vort = (dvy_dx - dux_dy) / self.local_surface_jacobian()
+        if include_coriolis:
+            vort = vort + self.f
+        return vort.astype(self.dtype, copy=False)
 
     def integrate(self, q):
         return (q * abs(self.Jw)).sum()
@@ -1911,4 +2526,10 @@ class DGCubedSphereFaceNumpy:
         return u, v, w
 
 
-__all__ = ["DGCubedSphereSWENumpy", "DGCubedSphereFaceNumpy"]
+__all__ = [
+    "DGCubedSphereSWENumpy",
+    "DGCubedSphereFaceNumpy",
+    "SIACKernel",
+    "centered_cardinal_bspline",
+    "siac_kernel",
+]
