@@ -269,19 +269,22 @@ def lgP(n, xi):
     """
     Evaluates P_{n}(xi) using an iterative algorithm
     """
+    xi = np.asarray(xi)
+    scalar_input = xi.ndim == 0
+
     if n == 0:
 
-        return np.ones(xi.size)
+        out = np.ones_like(xi, dtype=float)
 
     elif n == 1:
 
-        return xi
+        out = xi.copy()
 
     else:
 
-        fP = np.ones(xi.size);
+        fP = np.ones_like(xi, dtype=float);
         sP = xi.copy();
-        nP = np.empty(xi.size)
+        nP = np.empty_like(xi, dtype=float)
 
         for i in range(2, n + 1):
             nP = ((2 * i - 1) * xi * sP - (i - 1) * fP) / i
@@ -289,7 +292,9 @@ def lgP(n, xi):
             fP = sP;
             sP = nP
 
-        return nP
+        out = nP
+
+    return out.item() if scalar_input else out
 
 
 def analyze_conserved_quantities(solver, tend, label, dt=None):
