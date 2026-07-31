@@ -1,7 +1,7 @@
 from matplotlib import pyplot as plt
 import numpy as np
 from scipy.stats import linregress
-from dg_swe.dg_cubed_sphere_swe import DGCubedSphereSWE
+from dg_swe.dg_cubed_sphere_swe_numpy import DGCubedSphereSWENumpy
 import os
 import time
 
@@ -10,8 +10,8 @@ if not os.path.exists('./data'): os.makedirs('./data')
 
 plt.rcParams['font.size'] = '12'
 
-mode = 'process-data'
-i_start = 100
+mode = 'restart'
+i_start = 720
 dev = 'cpu'
 
 eps = 0.8 * 2
@@ -109,7 +109,7 @@ def plot_orography(idx):
     plt.savefig(f'./plots/williamson_5_orography.png')
 
 
-solver = DGCubedSphereSWE(
+solver = DGCubedSphereSWENumpy(
     poly_order, nx, ny, g, f,
     eps, device=dev, solution=None, a=0.5, ah=ah, radius=radius,
     dtype=np.float64, damping=None, tangent_diss=tangent_diss
@@ -148,7 +148,7 @@ if mode == 'restart':
     print('Loading:', fn_template)
     solver.load_restart(fn_template, 'data')
 
-    for i in range(i_start, 720):
+    for i in range(i_start, i_start+360):
         print('\nRunning day', i + 1)
         tend = solver.time + 3600 * 24
         print('h min max:', min(f.h.min() for f in solver.faces.values()), max(f.h.max() for f in solver.faces.values()), solver.get_dt())
@@ -161,10 +161,10 @@ if mode == 'restart':
             dt = min(dt, tend - solver.time)
             solver.time_step(dt=dt, order=34)
 
-        if ((i + 1) % 20 == 0):
+        if ((i + 1) % 1 == 0):
             fn_template = get_fn_template(i + 1, tangent_diss)
             print('Saving:', fn_template)
-            solver.save_restart(fn_template, 'data')
+            solver.save_restart('np_' + fn_template, 'data')
         # fn_template = f"reduced_williamson_5_day_{i + 1}.npy"
         # solver.save_restart(fn_template, 'data')
 

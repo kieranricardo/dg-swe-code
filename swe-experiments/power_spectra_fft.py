@@ -26,7 +26,7 @@ else:
     ah = 0.0
 
 nx = ny = 64
-max_n = 200
+max_n = 400
 nlat = max(4 * max_n + 1, 2 * (ny - 1) * (poly_order + 1) + 1)
 nlon = max(8 * max_n + 2, 4 * (nx - 1) * (poly_order + 1) + 2)
 # day = 16
@@ -79,7 +79,13 @@ def evaluate_ke_latlon(solver, lat_grid, lon_grid):
 
 def evaluate_enstrophy_latlon(solver, lat_grid, lon_grid):
 
-    return solver.evaluate_latlong(lat_grid, lon_grid, solver.enstrophy())
+    vort = solver.vorticity()
+    enstrophy_coeffs = {
+        name: (vort[name] - face.f)**2 / face.h 
+        for name, face in solver.faces.items()
+    }
+
+    return solver.evaluate_latlong(lat_grid, lon_grid, enstrophy_coeffs)
 
 
 def normalized_associated_legendre(n, m, x):
@@ -168,11 +174,12 @@ def plot_spectra(ke_spectrum, enstrophy_spectrum, fn_template):
 
     axes[0].semilogy(ke_spectrum)
     add_reference_line(axes[0], ke_spectrum, 45, -5/3, r'$n^{-5/3}$')
+    # add_reference_line(axes[0], ke_spectrum, 120, -3.0, r'$n^{-3}$')
     axes[0].set_title('Kinetic energy')
     axes[0].set_ylabel('Power')
 
     axes[1].semilogy(enstrophy_spectrum)
-    add_reference_line(axes[1], enstrophy_spectrum, 45, -1.0, r'$n^{-1}$')
+    add_reference_line(axes[1], enstrophy_spectrum, 75, -1.0, r'$n^{-1}$')
     axes[1].set_title('Enstrophy')
     axes[1].set_ylabel('Power')
 
@@ -198,8 +205,7 @@ def main():
         eps, a=0.5, ah=ah, radius=radius,
         dtype=np.float64, tangent_diss=tangent_diss
     )
-
-
+    
     fn_template = get_fn_template(1080)
     # fn_template = f"{exp_name}_day_{day}.npy"
     # fp = os.path.join('data', f'{fn_template}_ke_enstrophy_spectra_fft_n{max_n}_nlat{nlat}_nlon{nlon}.pkl')
@@ -225,8 +231,8 @@ def main():
     # with open(fp, 'rb') as file:
     #     coeffs = pickle.load(file)
 
-    ke_spectrum = spectrum_from_coeffs(coeffs['ke'])
-    enstrophy_spectrum = spectrum_from_coeffs(coeffs['enstrophy'])
+    ke_spectrum = spectrum_from_coeffs(ke_coeffs)
+    enstrophy_spectrum = spectrum_from_coeffs(enstrophy_coeffs)
     plot_spectra(ke_spectrum, enstrophy_spectrum, fn_template)
 
 
