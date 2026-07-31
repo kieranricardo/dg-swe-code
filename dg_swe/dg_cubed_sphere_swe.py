@@ -135,9 +135,14 @@ class DGCubedSphereSWE:
             cell_mins = state[n][3].amin(dim=(2, 3))
             diff_min = cell_mins - cell_means
 
-            new_min = np.minimum(5, cell_means)
-            new_min = np.maximum(new_min, cell_mins)
-            scale = (new_min - cell_means) / diff_min
+            min_floor = torch.full_like(cell_means, 5.0)
+            target_min = torch.minimum(min_floor, cell_means)
+            needs_limiting = cell_mins < target_min
+            scale = torch.ones_like(cell_means)
+            scale[needs_limiting] = (
+                target_min[needs_limiting] - cell_means[needs_limiting]
+            ) / diff_min[needs_limiting]
+            scale = torch.clamp(scale, min=0.0, max=1.0)
 
             # scale = (cell_mins > 5.0)
 

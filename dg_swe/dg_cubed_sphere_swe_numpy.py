@@ -672,7 +672,6 @@ class DGCubedSphereSWENumpy:
         return min(face.get_dt() for face in self.faces.values())
 
     def positivity_preserving_limiter(self, state):
-
         for n in self.active_face_names:
             # if state[n][3].min() < 0:
                 # print('0 detected')
@@ -683,14 +682,13 @@ class DGCubedSphereSWENumpy:
             cell_mins = state[n][3].min(axis=(2, 3))
             diff_min = cell_mins - cell_means
 
-            new_min = np.minimum(5, cell_means)
-            new_min = np.maximum(new_min, cell_mins)
-            scale = np.divide(
-                new_min - cell_means,
-                diff_min,
-                out=np.ones_like(cell_means),
-                where=diff_min != 0,
-            )
+            target_min = np.minimum(5.0, cell_means)
+            needs_limiting = cell_mins < target_min
+            scale = np.ones_like(cell_means)
+            scale[needs_limiting] = (
+                target_min[needs_limiting] - cell_means[needs_limiting]
+            ) / diff_min[needs_limiting]
+            scale = np.clip(scale, 0.0, 1.0)
 
             # scale = (cell_mins > 5.0)
 
