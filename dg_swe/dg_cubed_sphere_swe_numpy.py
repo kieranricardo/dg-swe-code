@@ -654,14 +654,36 @@ class DGCubedSphereSWENumpy:
             self.face_name = None
             self.active_face_names = self.face_names
 
+        face_nx = nx
+        face_ny = ny
+        face_partition = {}
+        if self.parallel:
+            global_nx, local_nx, x_min, x_max = self._local_axis_partition(
+                nx, self.nprocx, self.x_proc_idx, "nx"
+            )
+            global_ny, local_ny, y_min, y_max = self._local_axis_partition(
+                ny, self.nprocy, self.y_proc_idx, "ny"
+            )
+            face_nx = local_nx + 1
+            face_ny = local_ny + 1
+            face_partition = {
+                "global_nx": global_nx,
+                "global_ny": global_ny,
+                "x_min": x_min,
+                "x_max": x_max,
+                "y_min": y_min,
+                "y_max": y_max,
+            }
+
         self.faces = {
             name: DGCubedSphereFaceNumpy(
-                name, poly_order, nx, ny, g, f, radius, eps, device, a=a, ah=ah, dtype=dtype,
+                name, poly_order, face_nx, face_ny, g, f, radius, eps, device, a=a, ah=ah, dtype=dtype,
                 bc='', tangent_diss=tangent_diss,
                 x_proc_idx=self.x_proc_idx if self.parallel else 0,
                 y_proc_idx=self.y_proc_idx if self.parallel else 0,
                 nprocx=self.nprocx if self.parallel else 1,
                 nprocy=self.nprocy if self.parallel else 1,
+                **face_partition,
             )
             for name in self.active_face_names
         }
@@ -702,6 +724,25 @@ class DGCubedSphereSWENumpy:
     @property
     def nproc(self):
         return 6 * self.nprocx * self.nprocy
+
+    @staticmethod
+    def _local_axis_partition(num_points, nproc, proc_idx, name):
+        num_elements = num_points - 1
+        if num_elements % nproc != 0:
+            raise ValueError(
+                f"{name} - 1 must be divisible by nproc; got {name}={num_points}, nproc={nproc}."
+            )
+
+        local_elements = num_elements // nproc
+        start = proc_idx * local_elements
+        stop = start + local_elements
+        dx = 1.0 / num_elements
+        return (
+            num_elements,
+            local_elements,
+            -0.5 + start * dx,
+            -0.5 + stop * dx,
+        )
 
     @property
     def x_proc_idx(self):
@@ -1657,8 +1698,9 @@ class DGCubedSphereFaceNumpy:
 
     def __init__(
             self, name, poly_order, nx, ny, g, f, radius, eps, device='cpu',
-            solution=None, a=0.0, ah=0.0, dtype=np.float64, bc='wall', 
-            tangent_diss=False, x_proc_idx=0, y_proc_idx=0, nprocx=1, nprocy=1, 
+            solution=None, a=0.0, ah=0.0, dtype=np.float64, bc='wall',
+            tangent_diss=False, x_proc_idx=0, y_proc_idx=0, nprocx=1, nprocy=1,
+            global_nx=None, global_ny=None, x_min=None, x_max=None, y_min=None, y_max=None,
             **kwargs
         ):
 
@@ -1688,12 +1730,49 @@ class DGCubedSphereFaceNumpy:
         [y_1d, w_y] = gll(poly_order, iterative=True)
         self.gll_nodes = xs_1d
 
-        global_nx = nx - 1
-        global_ny = ny - 1
-        if global_nx % nprocx != 0:
-            raise ValueError(f"nx - 1 must be divisible by nprocx; got nx={nx}, nprocx={nprocx}.")
-        if global_ny % nprocy != 0:
-            raise ValueError(f"ny - 1 must be divisible by nprocy; got ny={ny}, nprocy={nprocy}.")
+        explicit_domain = any(
+            bound is not None for bound in (x_min, x_max, y_min, y_max)
+        )
+        if explicit_domain and any(
+            bound is None for bound in (x_min, x_max, y_min, y_max)
+        ):
+            raise ValueError(
+                "x_min, x_max, y_min, and y_max must all be provided together."
+            )
+
+        if explicit_domain:
+            local_nx = nx - 1
+            local_ny = ny - 1
+            if global_nx is None:
+                global_nx = local_nx
+            if global_ny is None:
+                global_ny = local_ny
+        else:
+            global_nx = nx - 1 if global_nx is None else global_nx
+            global_ny = ny - 1 if global_ny is None else global_ny
+            if global_nx % nprocx != 0:
+                raise ValueError(
+                    f"nx - 1 must be divisible by nprocx; got nx={nx}, nprocx={nprocx}."
+                )
+            if global_ny % nprocy != 0:
+                raise ValueError(
+                    f"ny - 1 must be divisible by nprocy; got ny={ny}, nprocy={nprocy}."
+                )
+            local_nx = global_nx // nprocx
+            local_ny = global_ny // nprocy
+            x_start = x_proc_idx * local_nx
+            y_start = y_proc_idx * local_ny
+            dx = 1.0 / global_nx
+            dy = 1.0 / global_ny
+            x_min = -0.5 + x_start * dx
+            x_max = -0.5 + (x_start + local_nx) * dx
+            y_min = -0.5 + y_start * dy
+            y_max = -0.5 + (y_start + local_ny) * dy
+
+        if local_nx <= 0 or local_ny <= 0:
+            raise ValueError(
+                f"Local face dimensions must be positive; got local_nx={local_nx}, local_ny={local_ny}."
+            )
 
         self.global_nx = global_nx
         self.global_ny = global_ny
@@ -1702,14 +1781,8 @@ class DGCubedSphereFaceNumpy:
         self.nprocx = nprocx
         self.nprocy = nprocy
 
-        x_edges = np.linspace(-0.5, 0.5, nx)
-        y_edges = np.linspace(-0.5, 0.5, ny)
-        local_nx = global_nx // nprocx
-        local_ny = global_ny // nprocy
-        x_start = x_proc_idx * local_nx
-        y_start = y_proc_idx * local_ny
-        xs = x_edges[x_start:x_start + local_nx + 1]
-        ys = y_edges[y_start:y_start + local_ny + 1]
+        xs = np.linspace(x_min, x_max, local_nx + 1)
+        ys = np.linspace(y_min, y_max, local_ny + 1)
         self.x_min = xs[0]
         self.y_min = ys[0]
         self.x_max = xs[-1]

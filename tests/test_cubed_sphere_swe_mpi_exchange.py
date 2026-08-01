@@ -4,6 +4,7 @@ os.environ.setdefault("MPLCONFIGDIR", "/private/tmp")
 
 import numpy as np
 
+import dg_swe.dg_cubed_sphere_swe_numpy as swe_numpy
 from dg_swe.dg_cubed_sphere_swe_numpy import DGCubedSphereSWENumpy
 
 
@@ -155,6 +156,44 @@ def test_numpy_mpi_boundary_buffers_match_serial_exchange():
         parallel_face = parallel[face_idx].faces[name]
         for attr, idx, reference in _external_boundaries(serial_face):
             np.testing.assert_array_equal(getattr(parallel_face, attr)[idx], reference)
+
+
+def test_numpy_mpi_face_setup_receives_local_subtile_sizes(monkeypatch):
+    calls = []
+    original_face_class = swe_numpy.DGCubedSphereFaceNumpy
+
+    class RecordingFace(original_face_class):
+        def __init__(self, name, poly_order, nx, ny, *args, **kwargs):
+            calls.append((name, nx, ny, kwargs.copy()))
+            super().__init__(name, poly_order, nx, ny, *args, **kwargs)
+
+    monkeypatch.setattr(swe_numpy, "DGCubedSphereFaceNumpy", RecordingFace)
+
+    DGCubedSphereSWENumpy(
+        poly_order=1,
+        nx=9,
+        ny=9,
+        g=9.81,
+        f=1.0e-4,
+        eps=0.1,
+        radius=1.0,
+        dtype=np.float64,
+        nprocx=2,
+        nprocy=2,
+        comm=_FakeComm(rank=5, size=len(FACE_NAMES) * 4, mailbox={}),
+    )
+
+    assert len(calls) == 1
+    name, nx, ny, kwargs = calls[0]
+    assert name == "zn"
+    assert nx == 5
+    assert ny == 5
+    assert kwargs["global_nx"] == 8
+    assert kwargs["global_ny"] == 8
+    assert kwargs["x_min"] == -0.5
+    assert kwargs["x_max"] == 0.0
+    assert kwargs["y_min"] == 0.0
+    assert kwargs["y_max"] == 0.5
 
 
 def test_numpy_mpi_restart_files_are_full_faces_for_subtile_ranks(tmp_path):
