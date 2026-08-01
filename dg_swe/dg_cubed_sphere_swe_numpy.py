@@ -1123,6 +1123,10 @@ class DGCubedSphereSWENumpy:
         return out
 
     def _evaluate_cartesian_many(self, x, y, z, coeffs_list):
+        coeffs_by_face = [self._coeffs_by_face(coeffs) for coeffs in coeffs_list]
+        return self._evaluate_cartesian_many_by_face(x, y, z, coeffs_by_face)
+
+    def _evaluate_cartesian_many_by_face(self, x, y, z, coeffs_by_face):
         if self.parallel:
             raise NotImplementedError(
                 "Sphere-wide Cartesian evaluation is only available in serial runs."
@@ -1135,8 +1139,7 @@ class DGCubedSphereSWENumpy:
         z_flat = z.ravel()
         face_names = face_name_from_cartesian(x_flat, y_flat, z_flat).ravel()
 
-        coeffs_by_face = [self._coeffs_by_face(coeffs) for coeffs in coeffs_list]
-        outputs = [None for _ in coeffs_list]
+        outputs = [None for _ in coeffs_by_face]
 
         for name in self.active_face_names:
             mask = face_names == name
@@ -1157,6 +1160,71 @@ class DGCubedSphereSWENumpy:
             outputs[idx] = outputs[idx].reshape(out_shape)
 
         return outputs
+
+    def _siac_extended_scalar_coeffs(self, face, coeffs_by_face, pad_x, pad_y):
+        ext_shape = (face.ny + 2 * pad_y, face.nx + 2 * pad_x, face.n, face.n)
+        coeffs_ext = np.empty(ext_shape, dtype=face.dtype)
+        coeffs_ext[
+            pad_y:pad_y + face.ny,
+            pad_x:pad_x + face.nx,
+        ] = coeffs_by_face[face.name]
+
+        if pad_x == 0 and pad_y == 0:
+            return coeffs_ext
+
+        x1, y1 = face._siac_extended_coordinates(pad_x, pad_y)
+        ghost_mask, x_nudge, y_nudge = face._siac_extension_ghost_mask(pad_x, pad_y)
+        node_mask = np.broadcast_to(ghost_mask[..., None, None], ext_shape)
+        x_eval = x1[node_mask] + np.broadcast_to(x_nudge[..., None, None], ext_shape)[node_mask]
+        y_eval = y1[node_mask] + np.broadcast_to(y_nudge[..., None, None], ext_shape)[node_mask]
+        x, y, z = face.geometry.to_cartesian(x_eval, y_eval)
+        coeffs_ext[node_mask] = self._evaluate_cartesian_many_by_face(
+            x, y, z, [coeffs_by_face]
+        )[0]
+        return coeffs_ext
+
+    def _siac_extended_covariant_velocity(self, face, pad_x, pad_y):
+        ext_shape = (face.ny + 2 * pad_y, face.nx + 2 * pad_x, face.n, face.n)
+        u_ext = np.empty(ext_shape, dtype=face.dtype)
+        v_ext = np.empty(ext_shape, dtype=face.dtype)
+
+        u_cov, v_cov = face.local_covariant_velocity()
+        u_ext[pad_y:pad_y + face.ny, pad_x:pad_x + face.nx] = u_cov
+        v_ext[pad_y:pad_y + face.ny, pad_x:pad_x + face.nx] = v_cov
+
+        if pad_x == 0 and pad_y == 0:
+            return u_ext, v_ext
+
+        x1, y1 = face._siac_extended_coordinates(pad_x, pad_y)
+        ghost_mask, x_nudge, y_nudge = face._siac_extension_ghost_mask(pad_x, pad_y)
+        node_mask = np.broadcast_to(ghost_mask[..., None, None], ext_shape)
+        x_eval = x1[node_mask] + np.broadcast_to(x_nudge[..., None, None], ext_shape)[node_mask]
+        y_eval = y1[node_mask] + np.broadcast_to(y_nudge[..., None, None], ext_shape)[node_mask]
+
+        x, y, z = face.geometry.to_cartesian(x_eval, y_eval)
+        velocity_coeffs = [
+            {name: source_face.u for name, source_face in self.faces.items()},
+            {name: source_face.v for name, source_face in self.faces.items()},
+            {name: source_face.w for name, source_face in self.faces.items()},
+        ]
+        u_sample, v_sample, w_sample = self._evaluate_cartesian_many_by_face(
+            x, y, z, velocity_coeffs
+        )
+        (
+            dxdx1,
+            dxdy1,
+            _,
+            dydx1,
+            dydy1,
+            _,
+            dzdx1,
+            dzdy1,
+            _,
+        ) = face.geometry.covariant_basis(x_eval, y_eval)
+
+        u_ext[node_mask] = u_sample * dxdx1 + v_sample * dydx1 + w_sample * dzdx1
+        v_ext[node_mask] = u_sample * dxdy1 + v_sample * dydy1 + w_sample * dzdy1
+        return u_ext, v_ext
 
     def siac_filter(
         self,
@@ -1229,24 +1297,19 @@ class DGCubedSphereSWENumpy:
 
         for name, face in self.faces.items():
             Hx, Hy = face._siac_widths(width, scale)
-            x_points, x_weights = kernel.quadrature(
-                quadrature_order, derivative=dx_order
+            pad_x, pad_y = face._siac_padding(Hx, Hy, kernel)
+            coeffs_ext = self._siac_extended_scalar_coeffs(
+                face, coeffs_by_face, pad_x, pad_y
             )
-            y_points, y_weights = kernel.quadrature(
-                quadrature_order, derivative=dy_order
+            x_matrix = face._siac_extended_matrix(
+                "x", dx_order, Hx, kernel, quadrature_order, pad_x
             )
-            x_weights = x_weights / Hx ** dx_order
-            y_weights = y_weights / Hy ** dy_order
-
-            filtered = np.zeros(face.x1.shape, dtype=np.result_type(face.dtype, float))
-            for ty, wy in zip(y_points, y_weights):
-                sample_y1 = face.y1 - Hy * ty
-                for tx, wx in zip(x_points, x_weights):
-                    sample_x1 = face.x1 - Hx * tx
-                    x, y, z = face.geometry.to_cartesian(sample_x1, sample_y1)
-                    values = self.evaluate_cartesian(x, y, z, coeffs_by_face)
-                    filtered += wx * wy * values
-            out[name] = filtered.astype(face.dtype, copy=False)
+            y_matrix = face._siac_extended_matrix(
+                "y", dy_order, Hy, kernel, quadrature_order, pad_y
+            )
+            out[name] = face._apply_siac_matrices(
+                coeffs_ext, x_matrix, y_matrix
+            ).astype(face.dtype, copy=False)
 
         return out
 
@@ -1290,55 +1353,24 @@ class DGCubedSphereSWENumpy:
             )
 
         out = {}
-        velocity_coeffs = [
-            {name: face.u for name, face in self.faces.items()},
-            {name: face.v for name, face in self.faces.items()},
-            {name: face.w for name, face in self.faces.items()},
-        ]
-
         for name, face in self.faces.items():
             Hx, Hy = face._siac_widths(width, scale)
-            x_points, x_filter_weights = kernel.quadrature(quadrature_order, derivative=0)
-            y_points, y_filter_weights = kernel.quadrature(quadrature_order, derivative=0)
-            _, x_derivative_weights = kernel.quadrature(quadrature_order, derivative=1)
-            _, y_derivative_weights = kernel.quadrature(quadrature_order, derivative=1)
-            x_derivative_weights = x_derivative_weights / Hx
-            y_derivative_weights = y_derivative_weights / Hy
-
-            dvy_dx = np.zeros(face.x1.shape, dtype=np.result_type(face.dtype, float))
-            dux_dy = np.zeros_like(dvy_dx)
-
-            for y_idx, ty in enumerate(y_points):
-                sample_y1 = face.y1 - Hy * ty
-                wy = y_filter_weights[y_idx]
-                dwy = y_derivative_weights[y_idx]
-                for x_idx, tx in enumerate(x_points):
-                    sample_x1 = face.x1 - Hx * tx
-                    wx = x_filter_weights[x_idx]
-                    dwx = x_derivative_weights[x_idx]
-
-                    x, y, z = face.geometry.to_cartesian(sample_x1, sample_y1)
-                    u_sample, v_sample, w_sample = self._evaluate_cartesian_many(
-                        x, y, z, velocity_coeffs
-                    )
-                    (
-                        dxdx1,
-                        dxdy1,
-                        _,
-                        dydx1,
-                        dydy1,
-                        _,
-                        dzdx1,
-                        dzdy1,
-                        _,
-                    ) = face.geometry.covariant_basis(sample_x1, sample_y1)
-
-                    u_cov = u_sample * dxdx1 + v_sample * dydx1 + w_sample * dzdx1
-                    v_cov = u_sample * dxdy1 + v_sample * dydy1 + w_sample * dzdy1
-
-                    dvy_dx += dwx * wy * v_cov
-                    dux_dy += wx * dwy * u_cov
-
+            pad_x, pad_y = face._siac_padding(Hx, Hy, kernel)
+            u_ext, v_ext = self._siac_extended_covariant_velocity(face, pad_x, pad_y)
+            x_filter = face._siac_extended_matrix(
+                "x", 0, Hx, kernel, quadrature_order, pad_x
+            )
+            y_filter = face._siac_extended_matrix(
+                "y", 0, Hy, kernel, quadrature_order, pad_y
+            )
+            x_derivative = face._siac_extended_matrix(
+                "x", 1, Hx, kernel, quadrature_order, pad_x
+            )
+            y_derivative = face._siac_extended_matrix(
+                "y", 1, Hy, kernel, quadrature_order, pad_y
+            )
+            dvy_dx = face._apply_siac_matrices(v_ext, x_derivative, y_filter)
+            dux_dy = face._apply_siac_matrices(u_ext, x_filter, y_derivative)
             vort = (dvy_dx - dux_dy) / face.local_surface_jacobian()
             if include_coriolis:
                 vort = vort + face.f
@@ -1627,6 +1659,7 @@ class DGCubedSphereFaceNumpy:
         self.ny = local_ny
         self.D = self.l1d.astype(self.dtype, copy=False)
         self._siac_matrix_cache = {}
+        self._siac_extension_coord_cache = {}
 
         dxdx1, dxdy1, dxdz1, dydx1, dydy1, dydz1, dzdx1, dzdy1, dzdz1 = self.geometry.covariant_basis(self.x1, self.y1)
         self.dxdxi = dxdx1.astype(self.dtype, copy=False) * lx / 2
@@ -1941,7 +1974,17 @@ class DGCubedSphereFaceNumpy:
             return self.y1[:, 0, :, 0].reshape(-1), self.y_min, self.ly, self.ny
         raise ValueError(f"axis: expected one of ['x', 'y']. Found {axis}.")
 
-    def _siac_matrix(self, axis, derivative_order, width, kernel, quadrature_order):
+    def _siac_axis_matrix(
+        self,
+        target_nodes,
+        coord_min,
+        cell_width,
+        num_cells,
+        derivative_order,
+        width,
+        kernel,
+        quadrature_order,
+    ):
         if derivative_order < 0:
             raise ValueError(
                 f"derivative_order must be non-negative; found {derivative_order}."
@@ -1952,7 +1995,37 @@ class DGCubedSphereFaceNumpy:
                 f"found derivative_order={derivative_order}, spline_order={kernel.spline_order}."
             )
 
+        num_targets = target_nodes.size
+        matrix = np.zeros((num_targets, num_cells * self.n), dtype=self.dtype)
+
+        quad_points, quad_weights = kernel.quadrature(
+            quadrature_order, derivative=derivative_order
+        )
+        quad_weights = quad_weights / width ** derivative_order
+
+        rows = np.arange(num_targets)[:, None]
+        local_cols = np.arange(self.n)[None, :]
+        coord_max = coord_min + num_cells * cell_width
+
+        for point, weight in zip(quad_points, quad_weights):
+            sample = np.clip(
+                target_nodes - width * point,
+                coord_min,
+                coord_max,
+            )
+            elem_coord = (sample - coord_min) / cell_width
+            elem = np.floor(elem_coord).astype(int)
+            elem = np.clip(elem, 0, num_cells - 1)
+            reference = np.clip(2.0 * (elem_coord - elem) - 1.0, -1.0, 1.0)
+            basis = lagrange_basis_values(reference, self.gll_nodes)
+            cols = elem[:, None] * self.n + local_cols
+            np.add.at(matrix, (rows, cols), weight * basis)
+
+        return matrix
+
+    def _siac_matrix(self, axis, derivative_order, width, kernel, quadrature_order):
         key = (
+            "local",
             axis,
             derivative_order,
             float(width),
@@ -1964,38 +2037,106 @@ class DGCubedSphereFaceNumpy:
             return cached
 
         target_nodes, coord_min, cell_width, num_cells = self._siac_axis_nodes(axis)
-        num_targets = target_nodes.size
-        matrix = np.zeros((num_targets, num_cells * self.n), dtype=self.dtype)
-
-        quad_points, quad_weights = kernel.quadrature(
-            quadrature_order, derivative=derivative_order
+        matrix = self._siac_axis_matrix(
+            target_nodes,
+            coord_min,
+            cell_width,
+            num_cells,
+            derivative_order,
+            width,
+            kernel,
+            quadrature_order,
         )
-        quad_weights = quad_weights / width ** derivative_order
-
-        rows = np.arange(num_targets)[:, None]
-        local_cols = np.arange(self.n)[None, :]
-
-        for point, weight in zip(quad_points, quad_weights):
-            sample = np.clip(
-                target_nodes - width * point,
-                coord_min,
-                coord_min + num_cells * cell_width,
-            )
-            elem_coord = (sample - coord_min) / cell_width
-            elem = np.floor(elem_coord).astype(int)
-            elem = np.clip(elem, 0, num_cells - 1)
-            reference = np.clip(2.0 * (elem_coord - elem) - 1.0, -1.0, 1.0)
-            basis = lagrange_basis_values(reference, self.gll_nodes)
-            cols = elem[:, None] * self.n + local_cols
-            np.add.at(matrix, (rows, cols), weight * basis)
 
         self._siac_matrix_cache[key] = matrix
         return matrix
 
+    def _siac_padding(self, Hx, Hy, kernel):
+        support = max(abs(kernel.breakpoints[0]), abs(kernel.breakpoints[-1]))
+        pad_x = int(np.ceil(max(0.0, support * Hx / self.lx - 1.0e-12)))
+        pad_y = int(np.ceil(max(0.0, support * Hy / self.ly - 1.0e-12)))
+        return pad_x, pad_y
+
+    def _siac_extended_matrix(
+        self, axis, derivative_order, width, kernel, quadrature_order, pad
+    ):
+        key = (
+            "extended",
+            axis,
+            int(pad),
+            derivative_order,
+            float(width),
+            int(quadrature_order),
+            kernel.cache_key(),
+        )
+        cached = self._siac_matrix_cache.get(key)
+        if cached is not None:
+            return cached
+
+        target_nodes, _, cell_width, _ = self._siac_axis_nodes(axis)
+        if axis == "x":
+            coord_min = self.x_min - pad * self.lx
+            num_cells = self.nx + 2 * pad
+        elif axis == "y":
+            coord_min = self.y_min - pad * self.ly
+            num_cells = self.ny + 2 * pad
+        else:
+            raise ValueError(f"axis: expected one of ['x', 'y']. Found {axis}.")
+
+        matrix = self._siac_axis_matrix(
+            target_nodes,
+            coord_min,
+            cell_width,
+            num_cells,
+            derivative_order,
+            width,
+            kernel,
+            quadrature_order,
+        )
+        self._siac_matrix_cache[key] = matrix
+        return matrix
+
+    def _siac_extended_coordinates(self, pad_x, pad_y):
+        key = (int(pad_x), int(pad_y))
+        cached = self._siac_extension_coord_cache.get(key)
+        if cached is not None:
+            return cached
+
+        x_cells = np.arange(-pad_x, self.nx + pad_x)
+        y_cells = np.arange(-pad_y, self.ny + pad_y)
+        local_nodes = 0.5 * (1.0 + self.gll_nodes)
+        x_nodes = self.x_min + (x_cells[:, None] + local_nodes[None, :]) * self.lx
+        y_nodes = self.y_min + (y_cells[:, None] + local_nodes[None, :]) * self.ly
+
+        shape = (y_cells.size, x_cells.size, self.n, self.n)
+        x1 = np.broadcast_to(x_nodes[None, :, None, :], shape).copy()
+        y1 = np.broadcast_to(y_nodes[:, None, :, None], shape).copy()
+        self._siac_extension_coord_cache[key] = (x1, y1)
+        return x1, y1
+
+    def _siac_extension_ghost_mask(self, pad_x, pad_y):
+        x_cells = np.arange(-pad_x, self.nx + pad_x)
+        y_cells = np.arange(-pad_y, self.ny + pad_y)
+        x_ghost = (x_cells < 0) | (x_cells >= self.nx)
+        y_ghost = (y_cells < 0) | (y_cells >= self.ny)
+        ghost_mask = y_ghost[:, None] | x_ghost[None, :]
+
+        x_nudge = np.zeros((y_cells.size, x_cells.size), dtype=self.dtype)
+        y_nudge = np.zeros_like(x_nudge)
+        x_nudge[:, x_cells < 0] = -1.0e-12 * self.lx
+        x_nudge[:, x_cells >= self.nx] = 1.0e-12 * self.lx
+        y_nudge[y_cells < 0, :] = -1.0e-12 * self.ly
+        y_nudge[y_cells >= self.ny, :] = 1.0e-12 * self.ly
+        return ghost_mask, x_nudge, y_nudge
+
     def _apply_siac_matrices(self, coeffs, x_matrix, y_matrix):
-        grid = coeffs.swapaxes(1, 2).reshape(self.ny * self.n, self.nx * self.n)
+        grid = coeffs.swapaxes(1, 2).reshape(
+            coeffs.shape[0] * self.n, coeffs.shape[1] * self.n
+        )
         filtered = y_matrix @ grid @ x_matrix.T
-        return filtered.reshape(self.ny, self.n, self.nx, self.n).swapaxes(1, 2)
+        out_ny = y_matrix.shape[0] // self.n
+        out_nx = x_matrix.shape[0] // self.n
+        return filtered.reshape(out_ny, self.n, out_nx, self.n).swapaxes(1, 2)
 
     def local_covariant_velocity(self, u=None, v=None, w=None):
         if u is None:
