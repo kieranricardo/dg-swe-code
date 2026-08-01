@@ -38,6 +38,7 @@ class _FakeComm:
         self.rank = rank
         self.size = size
         self.mailbox = mailbox
+        self._gather_index = 0
 
     def Get_rank(self):
         return self.rank
@@ -52,6 +53,22 @@ class _FakeComm:
     def Recv_init(self, buffer, source, tag=None):
         assert tag is None
         return _FakePersistentRequest(self.rank, "recv", buffer, source, self.mailbox)
+
+    def gather(self, value, root=0):
+        key = ("gather", self._gather_index, root)
+        self._gather_index += 1
+        contributions = self.mailbox.setdefault(key, {})
+        assert self.rank not in contributions
+        contributions[self.rank] = value
+        if self.rank == root:
+            assert len(contributions) == self.size
+            out = [contributions[rank] for rank in range(self.size)]
+            del self.mailbox[key]
+            return out
+        return None
+
+    def Barrier(self):
+        pass
 
 
 def _state(face):
@@ -138,3 +155,84 @@ def test_numpy_mpi_boundary_buffers_match_serial_exchange():
         parallel_face = parallel[face_idx].faces[name]
         for attr, idx, reference in _external_boundaries(serial_face):
             np.testing.assert_array_equal(getattr(parallel_face, attr)[idx], reference)
+
+
+def test_numpy_mpi_restart_files_are_full_faces_for_subtile_ranks(tmp_path):
+    solver_kwargs = dict(
+        poly_order=1,
+        nx=5,
+        ny=5,
+        g=9.81,
+        f=1.0e-4,
+        eps=0.1,
+        radius=1.0,
+        dtype=np.float64,
+    )
+    nprocx = nprocy = 2
+    size = len(FACE_NAMES) * nprocx * nprocy
+    mailbox = {}
+    solvers = [
+        DGCubedSphereSWENumpy(
+            **solver_kwargs,
+            nprocx=nprocx,
+            nprocy=nprocy,
+            comm=_FakeComm(rank, size, mailbox),
+        )
+        for rank in range(size)
+    ]
+
+    vars = ("u", "v", "w", "h")
+    for solver in solvers:
+        face = solver.faces[solver.face_name]
+        rank_pattern = np.arange(np.prod(face.J.shape), dtype=face.dtype).reshape(face.J.shape)
+        base = (
+            1000 * FACE_NAMES.index(solver.face_name)
+            + 100 * solver.x_proc_idx
+            + 10 * solver.y_proc_idx
+        )
+        state = tuple(base + var_idx + 0.01 * rank_pattern for var_idx in range(len(vars)))
+        face.set_initial_condition(*state)
+
+    template = "subtile_restart.npy"
+    for solver in solvers[1:]:
+        solver.save_restart(template, tmp_path)
+    solvers[0].save_restart(template, tmp_path)
+
+    expected_files = sorted(
+        f"{var}_{name}_{template}"
+        for name in FACE_NAMES
+        for var in vars
+    )
+    assert sorted(path.name for path in tmp_path.iterdir()) == expected_files
+
+    for name in FACE_NAMES:
+        for var in vars:
+            data = np.load(tmp_path / f"{var}_{name}_{template}")
+            assert data.shape == (4, 4, 2, 2)
+            for solver in solvers:
+                if solver.face_name != name:
+                    continue
+                face = solver.faces[name]
+                np.testing.assert_array_equal(
+                    data[solver._restart_tile_slice(face)],
+                    getattr(face, var),
+                )
+
+    reloaded = [
+        DGCubedSphereSWENumpy(
+            **solver_kwargs,
+            nprocx=nprocx,
+            nprocy=nprocy,
+            comm=_FakeComm(rank, size, {}),
+        )
+        for rank in range(size)
+    ]
+    for solver in reloaded:
+        solver.boundaries = lambda: None
+        solver.load_restart(template, tmp_path)
+
+    for expected_solver, actual_solver in zip(solvers, reloaded):
+        expected_face = expected_solver.faces[expected_solver.face_name]
+        actual_face = actual_solver.faces[actual_solver.face_name]
+        for var in vars:
+            np.testing.assert_array_equal(getattr(actual_face, var), getattr(expected_face, var))

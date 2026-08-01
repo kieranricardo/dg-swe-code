@@ -1476,8 +1476,103 @@ class DGCubedSphereSWENumpy:
     def mass(self):
         return {n: f.h for n, f in self.faces.items()}
 
+    def _restart_tile(self, var):
+        face = self.faces[self.face_name]
+        return (
+            self.face_name,
+            self.x_proc_idx,
+            self.y_proc_idx,
+            np.ascontiguousarray(_to_numpy(getattr(face, var))),
+        )
+
+    def _restart_tile_slice(self, face):
+        y0 = face.y_proc_idx * face.ny
+        x0 = face.x_proc_idx * face.nx
+        return np.s_[y0:y0 + face.ny, x0:x0 + face.nx, :, :]
+
+    def _assemble_restart_face(self, tiles):
+        expected_tiles = self.nprocx * self.nprocy
+        if len(tiles) != expected_tiles:
+            raise ValueError(
+                f"Restart gather expected {expected_tiles} tiles per face; found {len(tiles)}."
+            )
+
+        local_shape = tiles[0][2].shape
+        if len(local_shape) != 4:
+            raise ValueError(f"Restart tile must be 4D; found shape {local_shape}.")
+
+        local_ny, local_nx, n_eta, n_xi = local_shape
+        out = np.empty(
+            (local_ny * self.nprocy, local_nx * self.nprocx, n_eta, n_xi),
+            dtype=tiles[0][2].dtype,
+        )
+
+        seen = set()
+        for x_idx, y_idx, tile in tiles:
+            if not (0 <= x_idx < self.nprocx and 0 <= y_idx < self.nprocy):
+                raise ValueError(
+                    f"Restart tile index ({x_idx}, {y_idx}) is outside "
+                    f"({self.nprocx}, {self.nprocy})."
+                )
+            if tile.shape != local_shape:
+                raise ValueError(
+                    f"Restart tiles for a face must all have shape {local_shape}; "
+                    f"found {tile.shape}."
+                )
+            key = (x_idx, y_idx)
+            if key in seen:
+                raise ValueError(f"Duplicate restart tile index {key}.")
+            seen.add(key)
+
+            y0 = y_idx * local_ny
+            x0 = x_idx * local_nx
+            out[y0:y0 + local_ny, x0:x0 + local_nx] = tile
+
+        if len(seen) != expected_tiles:
+            raise ValueError(
+                f"Restart gather found {len(seen)} unique tiles; expected {expected_tiles}."
+            )
+        return out
+
+    def _save_parallel_restart_var(self, var, fn_template, directory):
+        gathered = self.comm.gather(self._restart_tile(var), root=0)
+        if self.rank != 0:
+            return
+
+        by_face = {name: [] for name in self.face_names}
+        for name, x_idx, y_idx, tile in gathered:
+            by_face[name].append((x_idx, y_idx, _to_numpy(tile)))
+
+        for name in self.face_names:
+            data = self._assemble_restart_face(by_face[name])
+            np.save(self.make_fp(var, name, fn_template, directory), data)
+
+    def _load_restart_data(self, var, name, fn_template, directory):
+        data = np.load(self.make_fp(var, name, fn_template, directory))
+        face = self.faces[name]
+        expected_shape = (face.global_ny, face.global_nx, face.n, face.n)
+        if data.shape != expected_shape:
+            raise ValueError(
+                f"Restart {var}_{name} has shape {data.shape}; expected {expected_shape}."
+            )
+        return data[self._restart_tile_slice(face)]
+
+    def _restart_barrier(self):
+        if self.comm is None:
+            return
+        if hasattr(self.comm, "Barrier"):
+            self.comm.Barrier()
+        elif hasattr(self.comm, "barrier"):
+            self.comm.barrier()
+
     def save_restart(self, fn_template, directory):
         vars = ['u', 'v', 'w', 'h']
+        if self.parallel:
+            for var in vars:
+                self._save_parallel_restart_var(var, fn_template, directory)
+            self._restart_barrier()
+            return
+
         state = {n: (self.faces[n].u, self.faces[n].v, self.faces[n].w, self.faces[n].h) for n in self.active_face_names}
         for name in self.active_face_names:
             for i in range(len(vars)):
@@ -1494,7 +1589,7 @@ class DGCubedSphereSWENumpy:
     def load_restart(self, fn_template, directory):
         for name in self.active_face_names:
             vars = ['u', 'v', 'w', 'h']
-            data = [np.load(self.make_fp(vars[i], name, fn_template, directory)) for i in range(len(vars))]
+            data = [self._load_restart_data(vars[i], name, fn_template, directory) for i in range(len(vars))]
             b = self.faces[name].b
             self.faces[name].set_initial_condition(*data)
             self.faces[name].b = b
