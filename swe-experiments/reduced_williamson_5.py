@@ -20,7 +20,7 @@ else:
     nprocx = nprocy = int(np.sqrt(size // 6))
 
 
-eps = 1.6
+eps = 0.4
 tangent_diss = True
 h_diss = True
 
@@ -33,14 +33,18 @@ parser = argparse.ArgumentParser()
 parser.add_argument('--order', type=int, help='Polynomial order')
 parser.add_argument('--nx', type=int, help='Number of cells in horizontal')
 parser.add_argument('--plot', action='store_true')
+parser.add_argument('--restart', action='store_true')
+parser.add_argument('--day', type=int, help='Polynomial order')
 args = parser.parse_args()
 
 if args.plot:
     mode = 'plot'
+    day = args.day
+elif args.restart:
+    mode = 'restart'    
+    i_start = args.day
 else:
-    # mode = 'run'
-    mode = 'restart'
-    i_start = 1080
+    mode = 'run'    
 
 nx = ny = args.nx + 1
 poly_order = args.order
@@ -177,7 +181,7 @@ if mode == 'run':
     #     print('Wall time for 1 day:', (t1 - t0) / 20, '\n')
 
 if mode == 'plot':
-    fn_template = get_fn_template(1080)
+    fn_template = get_fn_template(day)
     solver.load_restart(fn_template + '.npy', data_dir)
     rel_vort_siac = solver.siac_vorticity(
         include_coriolis=False, 
@@ -214,10 +218,11 @@ if mode == 'plot':
 if mode == 'restart':
 
     fn_template = get_fn_template(i_start)
-    print('Loading:', fn_template)
+    if rank == 0:
+        print('Loading:', fn_template)
     solver.load_restart(fn_template + '.npy', data_dir)
 
-    for i in range(i_start, i_start+4*360):
+    for i in range(i_start, 3600):
         if rank == 0:
             print('\nRunning day', i + 1)
         tend = solver.time + 3600 * 24

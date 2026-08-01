@@ -26,8 +26,8 @@ if h_diss:
 else:
     ah = 0.0
 
-nx = ny = 57
-max_n = 400
+nx = ny = 112 + 1
+max_n = 800
 nlat = max(4 * max_n + 1, 2 * (ny - 1) * (poly_order + 1) + 1)
 nlon = max(8 * max_n + 2, 4 * (nx - 1) * (poly_order + 1) + 2)
 
