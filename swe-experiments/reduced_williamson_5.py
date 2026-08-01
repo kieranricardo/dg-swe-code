@@ -5,18 +5,20 @@ from dg_swe.dg_cubed_sphere_swe_numpy import DGCubedSphereSWENumpy
 import os
 import time
 from mpi4py import MPI
-
-if not os.path.exists('./plots'): os.makedirs('./plots')
-if not os.path.exists('./data'): os.makedirs('./data')
+import cmocean
+import argparse
 
 plt.rcParams['font.size'] = '12'
 
 comm = MPI.COMM_WORLD
 rank = comm.Get_rank()
+size = comm.Get_size()
 
-mode = 'run'
-i_start = 720
-dev = 'cpu'
+if size == 1:
+    nprocx = nprocy = 1
+else:
+    nprocx = nprocy = int(np.sqrt(size // 6))
+
 
 eps = 1.6
 tangent_diss = True
@@ -26,8 +28,22 @@ if h_diss:
     ah = 0.5
 else:
     ah = 0.0
-nx = ny = 64
 
+parser = argparse.ArgumentParser()
+parser.add_argument('--order', type=int, help='Polynomial order')
+parser.add_argument('--nx', type=int, help='Number of cells in horizontal')
+parser.add_argument('--plot', action='store_true')
+args = parser.parse_args()
+
+if args.plot:
+    mode = 'plot'
+else:
+    # mode = 'run'
+    mode = 'restart'
+    i_start = 1080
+
+nx = ny = args.nx + 1
+poly_order = args.order
 g = 9.80616 / 250
 f = 7.292e-5
 radius = 6.37122e6
@@ -35,7 +51,7 @@ u_0 = 0.5
 h_0 = 5960.0
 s_0 = 3000
 
-def get_fn_template(day, tangent_diss):
+def get_fn_template(day=None):
     suffix = ''
     if tangent_diss:
         suffix = suffix + 'tangent_diss'
@@ -48,10 +64,17 @@ def get_fn_template(day, tangent_diss):
     elif s_0 != 3000:
         raise ValueError(f'suffix: expedcted one of 3000, 4000. Found {s_0}.')
 
-    return f"reduced_williamson_5_day_{day}_nx{nx}_p{poly_order}_{suffix}.npy"
-# print('Froude number:', u_0 / np.sqrt(g * h_0))
+    if day is None:
+        return f"reduced_williamson_5_day_nx{nx-1}_p{poly_order}_{suffix}"
+    else:
+        return f"reduced_williamson_5_day_nx{nx-1}_p{poly_order}_{suffix}_{day}"
 
-poly_order = 3
+data_dir = os.path.join('data', get_fn_template())
+plot_dir = os.path.join('plots', get_fn_template())
+
+if rank == 0:
+    if not os.path.exists(data_dir): os.makedirs(data_dir)
+    if not os.path.exists(plot_dir): os.makedirs(plot_dir)
 
 def initial_condition(face):
     lat, long = face.geometry.lat_long(face.xs, face.ys, face.zs)
@@ -69,8 +92,7 @@ def initial_condition(face):
     r = np.sqrt((long)**2 + (lat - np.pi / 6)**2)
     b = s_0 * (1 - r / R)
     b[b < 0.0] = 0.0
-    # print('b min max:', b.min(), b.max())
-    # print()
+    
 
     u = long_vec_x * u_
     v = long_vec_y * u_
@@ -115,14 +137,16 @@ def plot_orography(idx):
 
 solver = DGCubedSphereSWENumpy(
     poly_order, nx, ny, g, f,
-    eps, device=dev, solution=None, a=0.5, ah=ah, radius=radius,
-    dtype=np.float64, damping=None, tangent_diss=tangent_diss
+    eps, a=0.5, ah=ah, radius=radius,
+    dtype=np.float64, tangent_diss=tangent_diss,
+    nprocx=nprocx, nprocy=nprocy
 )
 
 for face in solver.faces.values():
     face.set_initial_condition(*initial_condition(face))
 
 dt = 1800 * eps * (32 / nx)
+n_save = 1
 if rank == 0:
     print('Initial dt:', dt)
 
@@ -140,25 +164,63 @@ if mode == 'run':
         while solver.time < tend:
             solver.time_step(dt=min(dt, tend - solver.time), order=34)
 
-        if ((i + 1) % 20 == 0):
-            fn_template = get_fn_template(i + 1, tangent_diss)
+        if ((i + 1) % n_save == 0):
+            fn_template = get_fn_template(i + 1)
             if rank == 0:
                 print('Saving:', fn_template)
-            solver.save_restart(fn_template, 'data')
-    t1 = time.time()
+            solver.save_restart(fn_template, data_dir)
+            t1 = time.time()
+            if rank == 0:
+                print('Wall time for 1 day:', (t1 - t0) / n_save, '\n')
+            t0 = time.time()
     # if rank == 0:
     #     print('Wall time for 1 day:', (t1 - t0) / 20, '\n')
 
+if mode == 'plot':
+    fn_template = get_fn_template(1080)
+    solver.load_restart(fn_template + '.npy', data_dir)
+    rel_vort_siac = solver.siac_vorticity(
+        include_coriolis=False, 
+        boundary='sphere',
+        quadrature_order=10,
+        scale=0.75,
+    )
+
+    lat = np.linspace(-90, 90, 4 * 512)[:, None]
+    lon = np.linspace(-180, 180, 4 * 1024)[None, :]
+    vort_plot_siac = solver.evaluate_latlong(lat, lon, rel_vort_siac, degrees=True)
+
+    plt.figure(figsize=(10, 5), dpi=400)
+    plt.title('Relative vorticity (SIAC)')
+    plt.pcolormesh(lon.ravel(), lat.ravel(), vort_plot_siac, cmap=cmocean.cm.curl, vmin=-2.25e-5, vmax=2.25e-5)
+    plt.xlabel('Longitude')
+    plt.ylabel('Latitude')
+    plt.colorbar()
+
+    plt.savefig(f'./{plot_dir}/siac_vort_{fn_template}.png')
+
+    vort_plot = solver.evaluate_latlong(lat, lon, solver.vorticity(), degrees=True)
+    vort_plot -= 2 * 7.292e-5 * np.sin(lat * np.pi / 180)
+
+    plt.figure(figsize=(10, 5), dpi=400)
+    plt.title('Relative vorticity')
+    plt.pcolormesh(lon.ravel(), lat.ravel(), vort_plot, cmap=cmocean.cm.curl, vmin=-2.25e-5, vmax=2.25e-5)
+    plt.xlabel('Longitude')
+    plt.ylabel('Latitude')
+    plt.colorbar()
+
+    plt.savefig(f'./{plot_dir}/vort_{fn_template}.png')
+
 if mode == 'restart':
 
-    fn_template = get_fn_template(i_start, tangent_diss)
+    fn_template = get_fn_template(i_start)
     print('Loading:', fn_template)
-    solver.load_restart(fn_template, 'data')
+    solver.load_restart(fn_template + '.npy', data_dir)
 
-    for i in range(i_start, i_start+360):
-        print('\nRunning day', i + 1)
+    for i in range(i_start, i_start+4*360):
+        if rank == 0:
+            print('\nRunning day', i + 1)
         tend = solver.time + 3600 * 24
-        print('h min max:', min(f.h.min() for f in solver.faces.values()), max(f.h.max() for f in solver.faces.values()), solver.get_dt())
         is_nan = any(np.isnan(f.h).any() for f in solver.faces.values())
         if is_nan:
             print(f'NaN at day {i+1}.')
@@ -167,16 +229,17 @@ if mode == 'restart':
             solver.time_step(dt=min(dt, tend - solver.time), order=34)
 
         if ((i + 1) % 1 == 0):
-            fn_template = get_fn_template(i + 1, tangent_diss)
-            print('Saving:', fn_template)
-            solver.save_restart('np_' + fn_template, 'data')
+            fn_template = get_fn_template(i + 1)
+            if rank == 0:
+                print('Saving:', fn_template)
+            solver.save_restart(fn_template, data_dir)
         # fn_template = f"reduced_williamson_5_day_{i + 1}.npy"
         # solver.save_restart(fn_template, 'data')
 
 if mode == 'process-data':
 
     day = 0
-    fn_template = get_fn_template(day, tangent_diss=True)
+    fn_template = get_fn_template(day)
     solver.save_restart(fn_template, 'data')
 
     vort = solver.vorticity()
@@ -197,7 +260,7 @@ if mode == 'process-data':
 
 
     for day in range(20, 721, 20):
-        fn_template = get_fn_template(day, tangent_diss=True)
+        fn_template = get_fn_template(day)
         solver.load_restart(fn_template, 'data')
 
         vort = solver.vorticity()
@@ -208,32 +271,31 @@ if mode == 'process-data':
             np.save(fp, vort[name] - solver.faces[name].f)
 
 
-h_plot_func=lambda s: s.h
+# h_plot_func=lambda s: s.h
 
-vort_plot_func = lambda s: s.vorticity() - s.f
+# vort_plot_func = lambda s: s.vorticity() - s.f
 
-pv_plot_func = lambda s: (s.vorticity() - s.f) / (s.h)
+# pv_plot_func = lambda s: (s.vorticity() - s.f) / (s.h)
 
-# exit(0)
-#days = np.array([1, 2, 3, 4]) * 360
-# days = list(days) + [1800,]
-days = [720,]
-for i, day in enumerate(days):
-# for i, day in enumerate([360, 400, 700]):
-    fn_template = get_fn_template(day, tangent_diss=True)
-    solver.load_restart(fn_template, 'data')
-    print(min(f.h.min() for f in solver.faces.values()))
-    # plot_data(2 * i + 1, f'vort_day_{day}_nx{nx}_p{poly_order}', vort_plot_func, vmin=-3e-5, vmax=3e-5)
-    plot_data(2 * i + 1, f'vort_day_{day}_nx{nx}_p{poly_order}', pv_plot_func)
-    # plot_data(2 * i + 1, f'pv_day_{day}_nx{nx}_p{poly_order}', pv_plot_func)
-    plot_data(2 * i + 2, f'height_day_{day}_nx{nx}_p{poly_order}', h_plot_func)
+# # exit(0)
+# #days = np.array([1, 2, 3, 4]) * 360
+# # days = list(days) + [1800,]
+# days = [720,]
+# for i, day in enumerate(days):
+# # for i, day in enumerate([360, 400, 700]):
+#     fn_template = get_fn_template(day)
+#     solver.load_restart(fn_template, 'data')
+#     print(min(f.h.min() for f in solver.faces.values()))
+#     # plot_data(2 * i + 1, f'vort_day_{day}_nx{nx}_p{poly_order}', vort_plot_func, vmin=-3e-5, vmax=3e-5)
+#     plot_data(2 * i + 1, f'vort_day_{day}_nx{nx}_p{poly_order}', pv_plot_func)
+#     # plot_data(2 * i + 1, f'pv_day_{day}_nx{nx}_p{poly_order}', pv_plot_func)
+#     plot_data(2 * i + 2, f'height_day_{day}_nx{nx}_p{poly_order}', h_plot_func)
 
-    # fn_template = fn_template = get_fn_template(day, tangent_diss=False)
-    # solver.load_restart(fn_template, 'data')
-    # plot_data(2 * i + 3, f'vort_day_{day}_nx{nx}_p{poly_order}_tangent_diss', vort_plot_func)
-    # # plot_data(2 * i + 1, f'pv_day_{day}_nx{nx}_p{poly_order}', pv_plot_func)
-    # plot_data(2 * i + 4, f'height_day_{day}_nx{nx}_p{poly_order}_tangent_diss', h_plot_func)
-
+#     # solver.load_restart(fn_template, 'data')
+#     # plot_data(2 * i + 3, f'vort_day_{day}_nx{nx}_p{poly_order}_tangent_diss', vort_plot_func)
+#     # # plot_data(2 * i + 1, f'pv_day_{day}_nx{nx}_p{poly_order}', pv_plot_func)
+#     # plot_data(2 * i + 4, f'height_day_{day}_nx{nx}_p{poly_order}_tangent_diss', h_plot_func)
 
 
-plt.show()
+
+# plt.show()

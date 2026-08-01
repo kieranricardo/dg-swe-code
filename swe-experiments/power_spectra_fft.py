@@ -1,5 +1,5 @@
 from matplotlib import pyplot as plt
-from dg_swe.dg_cubed_sphere_swe import DGCubedSphereSWE
+from dg_swe.dg_cubed_sphere_swe_numpy import DGCubedSphereSWENumpy
 import numpy as np
 import os
 import pickle
@@ -7,7 +7,8 @@ import pickle
 
 plt.rcParams['font.size'] = '14'
 
-compute = False
+use_siac = True
+compute = True
 eps = 0.8
 g = 9.80616 / 250
 f = 7.292e-5
@@ -25,12 +26,13 @@ if h_diss:
 else:
     ah = 0.0
 
-nx = ny = 64
+nx = ny = 57
 max_n = 400
 nlat = max(4 * max_n + 1, 2 * (ny - 1) * (poly_order + 1) + 1)
 nlon = max(8 * max_n + 2, 4 * (nx - 1) * (poly_order + 1) + 2)
 
-def get_fn_template(day):
+
+def get_fn_template(day=None):
     suffix = ''
     if tangent_diss:
         suffix = suffix + 'tangent_diss'
@@ -41,10 +43,12 @@ def get_fn_template(day):
     if s_0 == 4000:
         suffix = suffix + '_big_mountain'
     elif s_0 != 3000:
-        raise ValueError(f'suffix: expected one of 3000, 4000. Found {s_0}.')
+        raise ValueError(f'suffix: expedcted one of 3000, 4000. Found {s_0}.')
 
-    return f"reduced_williamson_5_day_{day}_nx{nx}_p{poly_order}_{suffix}.npy"
-
+    if day is None:
+        return f"reduced_williamson_5_day_nx{nx-1}_p{poly_order}_{suffix}"
+    else:
+        return f"reduced_williamson_5_day_nx{nx-1}_p{poly_order}_{suffix}_{day}"
 
 # day = 16
 # exp_name = f'DG_res_tang_diss_6x{nx}x{ny}'
@@ -52,12 +56,14 @@ def get_fn_template(day):
 # out_name = 'galewsky'
 
 fn_template = get_fn_template(1080)
-out_name = 'reduced_willamson_5'
 
-data_dir = os.environ.get(
-    'SWE_DATA_DIR',
-    'data'
-)
+data_dir = os.path.join('data', get_fn_template())
+plot_dir = os.path.join('plots', get_fn_template())
+
+if use_siac:
+    out_fp = os.path.join(plot_dir, f'siac_spectra_{fn_template}.png')
+else:
+    out_fp = os.path.join(plot_dir, f'spectra_{fn_template}.png')
 
 
 def make_latlon_grid(nlat, nlon):
@@ -72,21 +78,78 @@ def make_latlon_grid(nlat, nlon):
 
 def evaluate_ke_latlon(solver, lat_grid, lon_grid):
     # Match power_spectra.py: form nodal KE first, then evaluate that DG field.
-    ke_coeffs = {
-        name: 0.5 * face.h * (face.u ** 2 + face.v ** 2 + face.w ** 2)
-        for name, face in solver.faces.items()
-    }
+    if use_siac:
+
+        h_siac = solver.siac_filter(
+            dict((name, solver.faces[name].h) for name in solver.face_names),
+            boundary='sphere',
+            quadrature_order=10,
+            scale=0.75
+        )
+
+        u_siac = solver.siac_filter(
+            dict((name, solver.faces[name].u) for name in solver.face_names),
+            boundary='sphere',
+            quadrature_order=10,
+            scale=0.75
+        )
+
+        v_siac = solver.siac_filter(
+            dict((name, solver.faces[name].v) for name in solver.face_names),
+            boundary='sphere',
+            quadrature_order=10,
+            scale=0.75
+        )
+
+        w_siac = solver.siac_filter(
+            dict((name, solver.faces[name].w) for name in solver.face_names),
+            boundary='sphere',
+            quadrature_order=10,
+            scale=0.75
+        )
+
+        ke_coeffs = dict(
+            (name, 0.5 * h_siac[name] * (u_siac[name]**2 + v_siac[name]**2 + w_siac[name]**2))
+            for name in solver.face_names
+        )
+
+    else:
+        ke_coeffs = {
+            name: 0.5 * face.h * (face.u ** 2 + face.v ** 2 + face.w ** 2)
+            for name, face in solver.faces.items()
+        }
 
     return solver.evaluate_latlong(lat_grid, lon_grid, ke_coeffs)
 
 
 def evaluate_enstrophy_latlon(solver, lat_grid, lon_grid):
 
-    vort = solver.vorticity()
-    enstrophy_coeffs = {
-        name: (vort[name] - face.f)**2 / face.h 
-        for name, face in solver.faces.items()
-    }
+    if use_siac:
+        rel_vort_siac = solver.siac_vorticity(
+            include_coriolis=False, 
+            boundary='sphere',
+            quadrature_order=10,
+            scale=0.75
+        )
+
+        h_siac = solver.siac_filter(
+            dict((name, solver.faces[name].h) for name in solver.face_names),
+            boundary='sphere',
+            quadrature_order=10,
+            scale=0.75
+        )
+
+        enstrophy_coeffs = dict(
+            (name, rel_vort_siac[name]**2 / h_siac[name])
+            for name in solver.face_names
+        )
+
+    else:
+        vort = solver.vorticity()
+        enstrophy_coeffs = {
+            name: (vort[name] - face.f)**2 / face.h 
+            for name, face in solver.faces.items()
+        }
 
     return solver.evaluate_latlong(lat_grid, lon_grid, enstrophy_coeffs)
 
@@ -191,9 +254,8 @@ def plot_spectra(ke_spectrum, enstrophy_spectrum, fn_template):
         ax.set_xlabel('Spherical wavenumber')
         ax.legend()
 
-    fp = os.path.join('plots', f'{out_name}_ke_enstrophy_spectra.png')
-    fig.savefig(fp)
-    plt.show()
+    fig.savefig(out_fp)
+    # plt.show()
 
 
 def main():
@@ -203,18 +265,19 @@ def main():
     if not os.path.exists('./data'):
         os.makedirs('./data')
 
-    solver = DGCubedSphereSWE(
+    solver = DGCubedSphereSWENumpy(
         poly_order, nx, ny, g, f,
         eps, a=0.5, ah=ah, radius=radius,
         dtype=np.float64, tangent_diss=tangent_diss
     )
-    
-    
-    fp = os.path.join('data', f'{fn_template}_ke_enstrophy_spectra_fft_n{max_n}_nlat{nlat}_nlon{nlon}.pkl')
-    
+
+    if use_siac:
+        coeffs_fp = os.path.join(data_dir, f'siac_coeffs_{fn_template}.pkl')
+    else:
+        coeffs_fp = os.path.join(data_dir, f'coeffs_{fn_template}.pkl')
     if compute:
         print('Loading', fn_template)
-        solver.load_restart(fn_template, data_dir)
+        solver.load_restart(fn_template + '.npy', data_dir)
 
         print(f'Evaluating KE and enstrophy on {nlat} x {nlon} lat/lon grid')
         lat_grid, lon_grid, colat, mu_weights = make_latlon_grid(nlat, nlon)
@@ -227,10 +290,10 @@ def main():
         print('Computing enstrophy spherical harmonic coefficients with longitude FFT')
         enstrophy_coeffs = spherical_harmonic_coefficients_fft(enstrophy, colat, mu_weights, max_n)
 
-        with open(fp, 'wb') as file:
+        with open(coeffs_fp, 'wb') as file:
             pickle.dump({'ke': ke_coeffs, 'enstrophy': enstrophy_coeffs}, file, pickle.HIGHEST_PROTOCOL)
 
-    with open(fp, 'rb') as file:
+    with open(coeffs_fp, 'rb') as file:
         coeffs = pickle.load(file)
 
     ke_spectrum = spectrum_from_coeffs(coeffs['ke'])

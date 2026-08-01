@@ -6,20 +6,22 @@ import scipy
 import os
 import time
 from mpi4py import MPI
-
-if not os.path.exists('./plots'): os.makedirs('./plots')
-if not os.path.exists('./data'): os.makedirs('./data')
+import cmocean
 
 comm = MPI.COMM_WORLD
 rank = comm.Get_rank()
 size = comm.Get_size()
 
+if rank == 0:
+    if not os.path.exists('./plots'): os.makedirs('./plots')
+    if not os.path.exists('./data'): os.makedirs('./data')
+
 plt.rcParams['font.size'] = '12'
 
-mode = 'run'
+mode = 'plot'
 dev = 'cpu'
 
-nx = ny = 33
+nx = ny = 101
 
 if size == 1:
     nprocx = nprocy = 1
@@ -133,57 +135,79 @@ elif mode == 'plot':
     )
     for face in solver.faces.values():
         face.set_initial_condition(*initial_condition(face))
-    E0 = solver.integrate(solver.entropy())
 
-    p = 12
-    solver_hr = DGCubedSphereSWENumpy(
-        p, nx, ny, g, f,
-        eps, device=dev, solution=None, a=0.5, radius=radius,
-        dtype=np.float64, damping='adaptive'
+    day = 16
+    exp = f'DG_res_tang_diss_6x{nx}x{ny}'
+    fn_template = f"{exp}_day_{day}.npy"
+    solver.load_restart(fn_template, 'data')
+    rel_vort_siac = solver.siac_vorticity(
+        include_coriolis=False, 
+        boundary='sphere',
+        quadrature_order=10,
+        scale=1.0,
     )
 
-    interpolator = Interpolate(3, p)
+    lat = np.linspace(-90, 90, 4 * 512)[:, None]
+    lon = np.linspace(-180, 180, 4 * 1024)[None, :]
+    vort_plot_siac = solver.evaluate_latlong(lat, lon, rel_vort_siac, degrees=True)
 
-    exp_names = [f'DG_res_6x{nx}x{ny}', f'DG_cntr_res_6x{nx}x{ny}'][:1]
-    labels = ['Diss.', 'Cons.']
+    plt.figure(figsize=(10, 5), dpi=400)
+    plt.title('Relative vorticity (SIAC)')
+    plt.pcolormesh(lon.ravel(), lat.ravel(), vort_plot_siac, cmap=cmocean.cm.curl)
+    plt.xlabel('Longitude')
+    plt.ylabel('Latitude')
+    plt.colorbar()
+    # E0 = solver.integrate(solver.entropy())
 
-    for exp, label in zip(exp_names, labels):
-        fn_template = f"{exp}_day_{20}.npy"
-        solver.plot_diagnostics(fn_template, 'data', 1, label)
+    # p = 12
+    # solver_hr = DGCubedSphereSWENumpy(
+    #     p, nx, ny, g, f,
+    #     eps, device=dev, solution=None, a=0.5, radius=radius,
+    #     dtype=np.float64, damping='adaptive'
+    # )
 
-    # plt.savefig(f'./plots/galewsky_conservation.png')
+    # interpolator = Interpolate(3, p)
 
-    vmin = -0.00015; vmax = 0.00015
-    plot_func = lambda s: s.vorticity() - s.f
+    # exp_names = [f'DG_res_6x{nx}x{ny}', f'DG_cntr_res_6x{nx}x{ny}'][:1]
+    # labels = ['Diss.', 'Cons.']
 
-    def interpolate_plot_func(s):
-        data = plot_func(solver.faces[s.name])
-        return interpolator.torch_interpolate(data)
+    # for exp, label in zip(exp_names, labels):
+    #     fn_template = f"{exp}_day_{20}.npy"
+    #     solver.plot_diagnostics(fn_template, 'data', 1, label)
 
-    day = 7
+    # # plt.savefig(f'./plots/galewsky_conservation.png')
 
-    for exp in exp_names:
+    # vmin = -0.00015; vmax = 0.00015
+    # plot_func = lambda s: s.vorticity() - s.f
 
-        fn_template = f"{exp}_day_{day}.npy"
-        solver.load_restart(fn_template, 'data')
-        E = solver.integrate(solver.entropy())
-        print(f'{exp} relative energy loss rate:', (E - E0) / (E0 * day * 24 * 3600))
-        print(f'{exp} adjusted energy loss rate (Wm^-2):', 3e9 * (E - E0) / (E0 * day * 24 * 3600))
+    # def interpolate_plot_func(s):
+    #     data = plot_func(solver.faces[s.name])
+    #     return interpolator.torch_interpolate(data)
 
-        for name, face in solver.faces.items():
-            data = [face.u, face.v, face.w, face.h]
-            data = [interpolator.torch_interpolate(tnsr).numpy() for tnsr in data]
-            solver_hr.faces[name].set_initial_condition(*data)
+    # day = 7
 
-        solver_hr.boundaries()
+    # for exp in exp_names:
 
-        fig = plt.figure()
-        ax = fig.add_subplot(111)
-        ax.set_xlabel("x (km)")
-        ax.set_ylabel("y (km)")
+    #     fn_template = f"{exp}_day_{day}.npy"
+    #     solver.load_restart(fn_template, 'data')
+    #     E = solver.integrate(solver.entropy())
+    #     print(f'{exp} relative energy loss rate:', (E - E0) / (E0 * day * 24 * 3600))
+    #     print(f'{exp} adjusted energy loss rate (Wm^-2):', 3e9 * (E - E0) / (E0 * day * 24 * 3600))
 
-        im = solver_hr.triangular_plot(ax, vmin=vmin, vmax=vmax, latlong=False, plot_func=interpolate_plot_func)
-        plt.colorbar(im[0])
+    #     for name, face in solver.faces.items():
+    #         data = [face.u, face.v, face.w, face.h]
+    #         data = [interpolator.torch_interpolate(tnsr).numpy() for tnsr in data]
+    #         solver_hr.faces[name].set_initial_condition(*data)
+
+    #     solver_hr.boundaries()
+
+    #     fig = plt.figure()
+    #     ax = fig.add_subplot(111)
+    #     ax.set_xlabel("x (km)")
+    #     ax.set_ylabel("y (km)")
+
+    #     im = solver_hr.triangular_plot(ax, vmin=vmin, vmax=vmax, latlong=False, plot_func=interpolate_plot_func)
+    #     plt.colorbar(im[0])
         # plt.savefig(f'./plots/vort_galewsky_{exp}_{int(day)}_days.png')
-
-    plt.show()
+    plt.savefig(f'./plots/vort_galewsky_{exp}_{int(day)}_days.png')
+    # plt.show()
