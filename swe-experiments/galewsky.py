@@ -12,13 +12,20 @@ if not os.path.exists('./data'): os.makedirs('./data')
 
 comm = MPI.COMM_WORLD
 rank = comm.Get_rank()
+size = comm.Get_size()
 
 plt.rcParams['font.size'] = '12'
 
 mode = 'run'
 dev = 'cpu'
 
-nx = ny = 64
+nx = ny = 33
+
+if size == 1:
+    nprocx = nprocy = 1
+else:
+    nprocx = nprocy = int(np.sqrt(size // 6))
+
 eps = 1.3
 g = 9.80616
 f = 7.292e-5
@@ -85,7 +92,7 @@ if mode == 'run':
         solver = DGCubedSphereSWENumpy(
             poly_order, nx, ny, g, f,
             eps, device=dev, solution=None, a=a, radius=radius,
-            dtype=np.float64, tangent_diss=True, ah=0.0
+            dtype=np.float64, tangent_diss=True, ah=0.0, nprocx=nprocx, nprocy=nprocy,
         )
         for face in solver.faces.values():
             face.set_initial_condition(*initial_condition(face))
@@ -103,10 +110,9 @@ if mode == 'run':
                 print('Running day', i)
             tend = solver.time + 3600 * 24
 
-            solver.time_step(dt=min(dt, tend - solver.time))
             t0 = time.time()
             while solver.time < tend:
-                solver.time_step(dt=min(dt, tend - solver.time))
+                solver.time_step(dt=min(dt, tend - solver.time), order=34)
 
             t1 = time.time()
             if rank == 0:
