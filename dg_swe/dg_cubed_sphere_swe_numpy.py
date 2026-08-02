@@ -995,8 +995,8 @@ class DGCubedSphereSWENumpy:
             cell_mins = state[n][3].min(axis=(2, 3))
             diff_min = cell_mins - cell_means
 
-            target_min = np.minimum(5.0, cell_means)
-            needs_limiting = cell_mins < target_min
+            target_min = np.minimum(10.0, cell_means)
+            needs_limiting = cell_mins <= target_min
             scale = np.ones_like(cell_means)
             scale[needs_limiting] = (
                 target_min[needs_limiting] - cell_means[needs_limiting]

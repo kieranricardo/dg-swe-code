@@ -7,7 +7,7 @@ import pickle
 
 plt.rcParams['font.size'] = '14'
 
-use_siac = True
+use_siac = False
 compute = True
 eps = 0.8
 g = 9.80616 / 250

@@ -19,8 +19,15 @@ if size == 1:
 else:
     nprocx = nprocy = int(np.sqrt(size // 6))
 
+# can use cfl = 1.6 upto day 3400
+# cfl = 0.4 definitely works
+# does cfl = 0.8 work?
+# Froude numbers get high ~4.4 at day 3500
+# even accounting for possible spuriously low h, 
+# replacing h = max(h_now, h_initial.min())
+# Froude numbers are ~2
 
-eps = 0.4
+cfl = 0.8
 tangent_diss = True
 h_diss = True
 
@@ -54,6 +61,17 @@ radius = 6.37122e6
 u_0 = 0.5
 h_0 = 5960.0
 s_0 = 3000
+
+# max wave speed approx 20 towards later end of simulation
+# can be a bit higher though
+wave_speed = 20 
+# 4 * nx * 3 nodal points around equator
+dx_average = 2 * np.pi * radius / (4 * nx * 3) 
+# 0.8 factor for smallest cubed sphere spacing
+# 0.8 factor for smallest nodal spacing (third order)
+dx_min = 0.8 * 0.8 * dx_average
+# 0.5 factor for 2 dimensions
+dt = cfl * 0.5 * dx_min / wave_speed
 
 def get_fn_template(day=None):
     suffix = ''
@@ -141,7 +159,7 @@ def plot_orography(idx):
 
 solver = DGCubedSphereSWENumpy(
     poly_order, nx, ny, g, f,
-    eps, a=0.5, ah=ah, radius=radius,
+    eps=0.0, a=0.5, ah=ah, radius=radius,
     dtype=np.float64, tangent_diss=tangent_diss,
     nprocx=nprocx, nprocy=nprocy
 )
@@ -149,7 +167,6 @@ solver = DGCubedSphereSWENumpy(
 for face in solver.faces.values():
     face.set_initial_condition(*initial_condition(face))
 
-dt = 1800 * eps * (32 / nx)
 n_save = 1
 if rank == 0:
     print('Initial dt:', dt)
@@ -181,6 +198,7 @@ if mode == 'run':
     #     print('Wall time for 1 day:', (t1 - t0) / 20, '\n')
 
 if mode == 'plot':
+
     fn_template = get_fn_template(day)
     solver.load_restart(fn_template + '.npy', data_dir)
     rel_vort_siac = solver.siac_vorticity(
@@ -192,28 +210,53 @@ if mode == 'plot':
 
     lat = np.linspace(-90, 90, 4 * 512)[:, None]
     lon = np.linspace(-180, 180, 4 * 1024)[None, :]
+
+    def _plot_func_helper(data, name, title, cmap, vmin=None, vmax=None):
+        plt.figure(figsize=(10, 5), dpi=400)
+        plt.title(title)
+        plt.pcolormesh(lon.ravel(), lat.ravel(), data, cmap=cmap, vmin=vmin, vmax=vmax)
+        plt.xlabel('Longitude')
+        plt.ylabel('Latitude')
+        plt.colorbar()
+
+        plt.savefig(f'./{plot_dir}/{name}_{fn_template}.png')
+
     vort_plot_siac = solver.evaluate_latlong(lat, lon, rel_vort_siac, degrees=True)
-
-    plt.figure(figsize=(10, 5), dpi=400)
-    plt.title('Relative vorticity (SIAC)')
-    plt.pcolormesh(lon.ravel(), lat.ravel(), vort_plot_siac, cmap=cmocean.cm.curl, vmin=-2.25e-5, vmax=2.25e-5)
-    plt.xlabel('Longitude')
-    plt.ylabel('Latitude')
-    plt.colorbar()
-
-    plt.savefig(f'./{plot_dir}/siac_vort_{fn_template}.png')
-
     vort_plot = solver.evaluate_latlong(lat, lon, solver.vorticity(), degrees=True)
     vort_plot -= 2 * 7.292e-5 * np.sin(lat * np.pi / 180)
+    h_plot = solver.evaluate_latlong(lat, lon, dict((name, face.h) for name, face in solver.faces.items()), degrees=True)
 
-    plt.figure(figsize=(10, 5), dpi=400)
-    plt.title('Relative vorticity')
-    plt.pcolormesh(lon.ravel(), lat.ravel(), vort_plot, cmap=cmocean.cm.curl, vmin=-2.25e-5, vmax=2.25e-5)
-    plt.xlabel('Longitude')
-    plt.ylabel('Latitude')
-    plt.colorbar()
+    _plot_func_helper(vort_plot_siac, 'siac_vort', 'Relative vorticity (SIAC)', cmocean.cm.curl, vmin=-2.25e-5, vmax=2.25e-5)
+    _plot_func_helper(vort_plot, 'vort', 'Relative vorticity', cmocean.cm.curl, vmin=-2.25e-5, vmax=2.25e-5)
+    _plot_func_helper(h_plot, 'h', 'Height', cmocean.cm.deep)
 
-    plt.savefig(f'./{plot_dir}/vort_{fn_template}.png')
+    u_plot = solver.evaluate_latlong(lat, lon, dict((name, face.u) for name, face in solver.faces.items()), degrees=True)
+    v_plot = solver.evaluate_latlong(lat, lon, dict((name, face.v) for name, face in solver.faces.items()), degrees=True)
+    w_plot = solver.evaluate_latlong(lat, lon, dict((name, face.w) for name, face in solver.faces.items()), degrees=True)
+
+    long_vec_x = np.cos(lon * np.pi / 180)
+    long_vec_y = np.sin(lon * np.pi / 180)
+    long_vec_z = 0 * lon
+
+    lat_vec_x = -np.sin(lat * np.pi / 180) * np.sin(lon * np.pi / 180)
+    lat_vec_y = np.sin(lat * np.pi / 180) * np.cos(lon * np.pi / 180)
+    lat_vec_z = np.cos(lat * np.pi / 180)
+
+    zonal_vel = long_vec_x * u_plot + long_vec_y * v_plot + long_vec_z * w_plot
+    meridional_vel = lat_vec_x * u_plot + lat_vec_y * v_plot + lat_vec_z * w_plot
+    speed = np.sqrt(zonal_vel**2 + meridional_vel**2)
+
+    _plot_func_helper(zonal_vel, 'zonal_vel', 'Zonal velocity', cmocean.cm.delta)
+    _plot_func_helper(meridional_vel, 'meridional_vel', 'Meridional velocity', cmocean.cm.delta)
+    _plot_func_helper(speed, 'speed', 'Speed', cmocean.cm.speed)
+
+    print('Min h:', h_plot.min())
+    print('Max vel:', speed.max())
+    froude_number = speed / (np.sqrt(g * h_plot))
+    print('Max froude number:', froude_number.max())
+    print('Max wave speed:', (speed + np.sqrt(g * h_plot)).max())
+
+
 
 if mode == 'restart':
 
