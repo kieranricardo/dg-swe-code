@@ -208,17 +208,59 @@ def spherical_harmonic_coefficients_fft(values, colat, mu_weights, max_n):
     if nlon_ < 2 * max_n - 1:
         raise ValueError(f"nlon: need at least {2 * max_n - 1} longitudes for max_n={max_n}. Found {nlon_}.")
 
+    x = np.cos(colat)
+    sin_colat = np.sqrt(np.maximum(0.0, 1.0 - x ** 2))
     dlon = 2 * np.pi / nlon_
-    lon_fft = np.fft.fft(values, axis=1) * dlon
 
-    coeffs = []
-    for n in range(max_n):
-        coeffs_n = []
-        for m in range(-n, n + 1):
-            lon_integral = lon_fft[:, m % nlon_]
-            lat_basis = spherical_harmonic_latitude(m, n, colat)
-            coeffs_n.append(np.sum(lon_integral * lat_basis * mu_weights))
-        coeffs.append(coeffs_n)
+    if np.isrealobj(values):
+        lon_fft = np.fft.rfft(values, axis=1) * dlon
+        use_conjugate_negative_modes = True
+    else:
+        lon_fft = np.fft.fft(values, axis=1) * dlon
+        use_conjugate_negative_modes = False
+
+    coeffs = [[None] * (2 * n + 1) for n in range(max_n)]
+    pmm = np.full(nlat_, 1 / np.sqrt(4 * np.pi), dtype=np.float64)
+
+    for m_abs in range(max_n):
+        lat_basis_by_n = np.empty((max_n - m_abs, nlat_), dtype=np.float64)
+        lat_basis_by_n[0] = pmm
+
+        if m_abs + 1 < max_n:
+            lat_basis_by_n[1] = np.sqrt(2 * m_abs + 3) * x * pmm
+
+            for i, ell in enumerate(range(m_abs + 2, max_n), start=2):
+                a = np.sqrt((2 * ell + 1) * (2 * ell - 1) / ((ell - m_abs) * (ell + m_abs)))
+                b = np.sqrt(
+                    (2 * ell + 1) * (ell + m_abs - 1) * (ell - m_abs - 1)
+                    / ((2 * ell - 3) * (ell - m_abs) * (ell + m_abs))
+                )
+                lat_basis_by_n[i] = a * x * lat_basis_by_n[i - 1] - b * lat_basis_by_n[i - 2]
+
+        if m_abs == 0:
+            modes = (lon_fft[:, 0] * mu_weights)[:, None]
+            integrals = lat_basis_by_n @ modes
+            for n, coeff in enumerate(integrals[:, 0]):
+                coeffs[n][n] = coeff
+        else:
+            positive_mode = lon_fft[:, m_abs]
+            if use_conjugate_negative_modes:
+                negative_mode = np.conj(positive_mode)
+            else:
+                negative_mode = lon_fft[:, -m_abs]
+
+            modes = np.column_stack((negative_mode * mu_weights, positive_mode * mu_weights))
+            integrals = lat_basis_by_n @ modes
+
+            if m_abs % 2:
+                integrals[:, 0] *= -1
+
+            for i, n in enumerate(range(m_abs, max_n)):
+                coeffs[n][n - m_abs] = integrals[i, 0]
+                coeffs[n][n + m_abs] = integrals[i, 1]
+
+        if m_abs + 1 < max_n:
+            pmm *= -np.sqrt((2 * m_abs + 3) / (2 * m_abs + 2)) * sin_colat
 
     return coeffs
 
@@ -260,10 +302,8 @@ def plot_spectra(ke_spectrum, enstrophy_spectrum, fn_template):
 
 def main():
 
-    if not os.path.exists('./plots'):
-        os.makedirs('./plots')
-    if not os.path.exists('./data'):
-        os.makedirs('./data')
+    os.makedirs(plot_dir, exist_ok=True)
+    os.makedirs(data_dir, exist_ok=True)
 
     solver = DGCubedSphereSWENumpy(
         poly_order, nx, ny, g, f,
@@ -279,16 +319,22 @@ def main():
         print('Loading', fn_template)
         solver.load_restart(fn_template + '.npy', data_dir)
 
-        print(f'Evaluating KE and enstrophy on {nlat} x {nlon} lat/lon grid')
+        print(f'Making {nlat} x {nlon} lat/lon grid')
         lat_grid, lon_grid, colat, mu_weights = make_latlon_grid(nlat, nlon)
+
+        print('Evaluating KE on lat/lon grid')
         ke = evaluate_ke_latlon(solver, lat_grid, lon_grid)
-        enstrophy = evaluate_enstrophy_latlon(solver, lat_grid, lon_grid)
 
         print('Computing KE spherical harmonic coefficients with longitude FFT')
         ke_coeffs = spherical_harmonic_coefficients_fft(ke, colat, mu_weights, max_n)
+        del ke
+
+        print('Evaluating enstrophy on lat/lon grid')
+        enstrophy = evaluate_enstrophy_latlon(solver, lat_grid, lon_grid)
 
         print('Computing enstrophy spherical harmonic coefficients with longitude FFT')
         enstrophy_coeffs = spherical_harmonic_coefficients_fft(enstrophy, colat, mu_weights, max_n)
+        del enstrophy
 
         with open(coeffs_fp, 'wb') as file:
             pickle.dump({'ke': ke_coeffs, 'enstrophy': enstrophy_coeffs}, file, pickle.HIGHEST_PROTOCOL)
