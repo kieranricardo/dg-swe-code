@@ -95,7 +95,7 @@ def initial_condition(face):
     return u, v, w, h
 
 
-def get_fn_template(a, tangent_diss, h_diss, froude_switch=None, day=None):
+def get_fn_template(a, tangent_diss, h_diss, day=None):
     suffix = ''
 
     suffix = suffix + f'a_{a}'
@@ -106,9 +106,6 @@ def get_fn_template(a, tangent_diss, h_diss, froude_switch=None, day=None):
     if h_diss:
         suffix = suffix + '_h_diss'
 
-    if froude_switch is not None:
-        suffix = suffix + f'_froude_switch_{froude_switch}'
-
     if day is not None:
         suffix = suffix + f'_day_{day}'
 
@@ -116,9 +113,8 @@ def get_fn_template(a, tangent_diss, h_diss, froude_switch=None, day=None):
 
 
 parameters_list = [
-    # dict(a=0.5, tangent_diss=True, h_diss=False, froude_switch=None),
-    dict(a=0.5, tangent_diss=True, h_diss=True, froude_switch=None),
-    # dict(a=0.5, tangent_diss=True, h_diss=False, froude_switch=0.0),
+    # dict(a=0.5, tangent_diss=True, h_diss=False),
+    dict(a=0.5, tangent_diss=True, h_diss=True),
 ]
 
 if mode == 'run':
@@ -127,7 +123,6 @@ if mode == 'run':
 
         a = parameters['a']
         tangent_diss = parameters['tangent_diss']
-        froude_switch = parameters['froude_switch']
         h_diss = parameters['h_diss']
 
         if parameters['h_diss']:
@@ -147,7 +142,7 @@ if mode == 'run':
             poly_order, nx, ny, g, f,
             eps, a=a, radius=radius,
             dtype=np.float64, tangent_diss=tangent_diss, ah=ah, 
-            nprocx=nprocx, nprocy=nprocy, froude_switch=froude_switch
+            nprocx=nprocx, nprocy=nprocy
         )
 
         for face in solver.faces.values():
@@ -159,7 +154,7 @@ if mode == 'run':
         if rank == 0:
             print('Time step:', dt)
             print('Starting', get_fn_template(**parameters))
-            print('a:', solver.faces['zp'].a, 'res:', nx, ny, 'froude_switch:', solver.faces['zp'].froude_switch)
+            print('a:', solver.faces['zp'].a, 'res:', nx, ny)
             print('ah:', solver.faces['zp'].ah, 'tangent_diss:', solver.faces['zp'].tangent_diss)
 
         for i in range(20):

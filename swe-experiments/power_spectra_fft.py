@@ -21,7 +21,6 @@ a = 0.5
 
 tangent_diss = True
 h_diss = True
-froude_switch = None
 
 if h_diss:
     ah = 0.5
@@ -64,9 +63,6 @@ def get_galewsky_fn_template(day=None):
 
     if h_diss:
         suffix = suffix + '_h_diss'
-
-    if froude_switch is not None:
-        suffix = suffix + f'_froude_switch_{froude_switch}'
 
     if day is not None:
         suffix = suffix + f'_day_{day}'
@@ -335,7 +331,7 @@ def main():
 
     solver = DGCubedSphereSWENumpy(
         poly_order, nx, ny, g, f,
-        eps, radius=radius, froude_switch=0.5
+        eps, radius=radius,
         dtype=np.float64, tangent_diss=tangent_diss
     )
 

@@ -153,7 +153,7 @@ solver = DGCubedSphereSWENumpy(
     poly_order, nx, ny, g, f,
     eps=0.0, a=0.5, ah=ah, radius=radius,
     dtype=np.float64, tangent_diss=tangent_diss,
-    nprocx=nprocx, nprocy=nprocy, froude_switch=None
+    nprocx=nprocx, nprocy=nprocy
 )
 
 for face in solver.faces.values():
