@@ -747,7 +747,6 @@ class DGCubedSphereSWENumpy:
 
         self.time = 0
         self.cdt = min(self.faces[n].cdt for n in self.active_face_names)
-        self.flag = True
         self.tangent_diss = tangent_diss
 
         self.time_list = []
@@ -755,7 +754,7 @@ class DGCubedSphereSWENumpy:
         self.enstrophy_list = []
         self.mass_list = []
         self.vorticity_list = []
-        self.vorticity_diagnostic = True # calculates a continuous diagnostic vorticity for plotting
+        self.vorticity_diagnostic = False # calculates a continuous diagnostic vorticity for plotting
 
     @staticmethod
     def _get_comm(comm, nprocx, nprocy):
@@ -1072,11 +1071,13 @@ class DGCubedSphereSWENumpy:
 
 
     def time_step(self, dt=None, order=3, forcing=None):
-        self.time_list.append(self.time)
-        self.energy_list.append(self.integrate(self.entropy()))
-        self.enstrophy_list.append(self.integrate(self.enstrophy()))
-        self.vorticity_list.append(self.integrate(self.vorticity()))
-        self.mass_list.append(self.integrate(self.mass()))
+
+        if self.vorticity_diagnostic:
+            self.time_list.append(self.time)
+            self.energy_list.append(self.integrate(self.entropy()))
+            self.enstrophy_list.append(self.integrate(self.enstrophy()))
+            self.vorticity_list.append(self.integrate(self.vorticity()))
+            self.mass_list.append(self.integrate(self.mass()))
 
         self.h = {n: f.h for n, f in self.faces.items()}  # only needs to be done once
         if dt is None:
