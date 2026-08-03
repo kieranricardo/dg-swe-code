@@ -160,7 +160,7 @@ solver = DGCubedSphereSWENumpy(
 for face in solver.faces.values():
     face.set_initial_condition(*initial_condition(face))
 
-n_save = 1
+n_save = 100
 if rank == 0:
     print('Initial dt:', dt)
 
