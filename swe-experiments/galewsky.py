@@ -107,7 +107,7 @@ def get_fn_template(a, tangent_diss, h_diss, froude_switch=None, day=None):
         suffix = suffix + '_h_diss'
 
     if froude_switch is not None:
-        suffix = suffix + f'_hllc_switch_{froude_switch}'
+        suffix = suffix + f'_froude_switch_{froude_switch}'
 
     if day is not None:
         suffix = suffix + f'_day_{day}'
