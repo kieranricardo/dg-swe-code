@@ -28,10 +28,10 @@ def _norm_l2(vec):
 
 def _hllc_fluxes_where_froude(
     h_l, vel_l, h_flux_l,
-    q0_l, q1_l, q0_flux_l, q1_flux_l, alpha0_l, alpha1_l,
+    q0_l, q1_l, q0_flux_l, q1_flux_l, q0_local_flux_l, q1_local_flux_l, alpha0_l, alpha1_l,
     h_r, vel_r, h_flux_r,
-    q0_r, q1_r, q0_flux_r, q1_flux_r, alpha0_r, alpha1_r,
-    g, froude_switch, h_flux,
+    q0_r, q1_r, q0_flux_r, q1_flux_r, q0_local_flux_r, q1_local_flux_r, alpha0_r, alpha1_r,
+    g, froude_switch, h_flux, scale_l, scale_r,
 ):
     c_l = np.sqrt(g * h_l)
     c_r = np.sqrt(g * h_r)
@@ -111,10 +111,10 @@ def _hllc_fluxes_where_froude(
     q1_delta_r = ((q1_hllc - q1_cons_r) - q1_r * (h_hllc - h_flux_r)) / h_r
 
     h_flux = np.where(use_hllc, h_hllc, h_flux)
-    q0_flux_l = np.where(use_hllc, q0_flux_l + q0_delta_l, q0_flux_l)
-    q0_flux_r = np.where(use_hllc, q0_flux_r + q0_delta_r, q0_flux_r)
-    q1_flux_l = np.where(use_hllc, q1_flux_l + q1_delta_l, q1_flux_l)
-    q1_flux_r = np.where(use_hllc, q1_flux_r + q1_delta_r, q1_flux_r)
+    q0_flux_l = np.where(use_hllc, q0_local_flux_l + scale_l * q0_delta_l, q0_flux_l)
+    q0_flux_r = np.where(use_hllc, q0_local_flux_r + scale_r * q0_delta_r, q0_flux_r)
+    q1_flux_l = np.where(use_hllc, q1_local_flux_l + scale_l * q1_delta_l, q1_flux_l)
+    q1_flux_r = np.where(use_hllc, q1_local_flux_r + scale_r * q1_delta_r, q1_flux_r)
     return h_flux, q0_flux_l, q0_flux_r, q1_flux_l, q1_flux_r
 
 
@@ -473,7 +473,7 @@ if njit is not None:
         c_l = np.sqrt(g * h_l)
         c_r = np.sqrt(g * h_r)
         if abs(vel_l) / c_l < froude_switch and abs(vel_r) / c_r < froude_switch:
-            return h_flux_current, 0.0, 0.0
+            return h_flux_current, 0.0, 0.0, False
 
         s_l = vel_l - c_l
         s_l_candidate = vel_r - c_r
@@ -488,7 +488,7 @@ if njit is not None:
         p_r = 0.5 * g * h_r * h_r
         denom = h_l * (s_l - vel_l) - h_r * (s_r - vel_r)
         if denom == 0.0:
-            return h_flux_current, 0.0, 0.0
+            return h_flux_current, 0.0, 0.0, False
         s_m = (
             p_r - p_l
             + h_l * vel_l * (s_l - vel_l)
@@ -526,7 +526,7 @@ if njit is not None:
 
         delta_l = ((q_hllc - flux_l) - q_l * (h_hllc - h_flux_l)) / h_l
         delta_r = ((q_hllc - flux_r) - q_r * (h_hllc - h_flux_r)) / h_r
-        return h_hllc, delta_l, delta_r
+        return h_hllc, delta_l, delta_r, True
 
 
     @njit(cache=True)
@@ -713,26 +713,58 @@ if njit is not None:
                     alpha_u_down = eta_x_down[ey, ex, xi] * dxdxi_down[ey, ex, xi] + eta_y_down[ey, ex, xi] * dydxi_down[ey, ex, xi] + eta_z_down[ey, ex, xi] * dzdxi_down[ey, ex, xi]
                     alpha_v_up = eta_x_up[ey, ex, xi] * dxdeta_up[ey, ex, xi] + eta_y_up[ey, ex, xi] * dydeta_up[ey, ex, xi] + eta_z_up[ey, ex, xi] * dzdeta_up[ey, ex, xi]
                     alpha_v_down = eta_x_down[ey, ex, xi] * dxdeta_down[ey, ex, xi] + eta_y_down[ey, ex, xi] * dydeta_down[ey, ex, xi] + eta_z_down[ey, ex, xi] * dzdeta_down[ey, ex, xi]
-                    h_hllc, delta_down, delta_up = _hllc_delta_scalar(
+                    h_hllc, delta_down, delta_up, use_hllc = _hllc_delta_scalar(
                         h_down[ey, ex, xi], vel_down[ey, ex, xi], h_down_flux[ey, ex, xi],
                         u_cov_down[ey, ex, xi], alpha_u_down,
                         h_up[ey, ex, xi], vel_up[ey, ex, xi], h_up_flux[ey, ex, xi],
                         u_cov_up[ey, ex, xi], alpha_u_up,
                         g, froude_switch, h_flux_vert[ey, ex, xi],
                     )
-                    h_flux_vert[ey, ex, xi] = h_hllc
-                    u_flux_vert_down[ey, ex, xi] += delta_down
-                    u_flux_vert_up[ey, ex, xi] += delta_up
-                    h_hllc, delta_down, delta_up = _hllc_delta_scalar(
+                    if use_hllc:
+                        if ey == 0:
+                            scale_down = J_vertface[0, ex, 0, xi] / J[0, ex, 0, xi]
+                        else:
+                            scale_down = J_vertface[ey - 1, ex, n - 1, xi] / J[ey - 1, ex, n - 1, xi]
+                        if ey == ny:
+                            scale_up = J_vertface[ny - 1, ex, n - 1, xi] / J[ny - 1, ex, n - 1, xi]
+                        else:
+                            scale_up = J_vertface[ey, ex, 0, xi] / J[ey, ex, 0, xi]
+                        h_flux_vert[ey, ex, xi] = h_hllc
+                        u_flux_vert_down[ey, ex, xi] = (
+                            v_contra_down[ey, ex, xi] * u_cov_down[ey, ex, xi]
+                            + scale_down * delta_down
+                        )
+                        u_flux_vert_up[ey, ex, xi] = (
+                            v_contra_up[ey, ex, xi] * u_cov_up[ey, ex, xi]
+                            + scale_up * delta_up
+                        )
+                    h_hllc, delta_down, delta_up, use_hllc = _hllc_delta_scalar(
                         h_down[ey, ex, xi], vel_down[ey, ex, xi], h_down_flux[ey, ex, xi],
                         v_cov_down[ey, ex, xi], alpha_v_down,
                         h_up[ey, ex, xi], vel_up[ey, ex, xi], h_up_flux[ey, ex, xi],
                         v_cov_up[ey, ex, xi], alpha_v_up,
                         g, froude_switch, h_flux_vert[ey, ex, xi],
                     )
-                    h_flux_vert[ey, ex, xi] = h_hllc
-                    v_flux_vert_down[ey, ex, xi] += delta_down
-                    v_flux_vert_up[ey, ex, xi] += delta_up
+                    if use_hllc:
+                        if ey == 0:
+                            scale_down = J_vertface[0, ex, 0, xi] / J[0, ex, 0, xi]
+                        else:
+                            scale_down = J_vertface[ey - 1, ex, n - 1, xi] / J[ey - 1, ex, n - 1, xi]
+                        if ey == ny:
+                            scale_up = J_vertface[ny - 1, ex, n - 1, xi] / J[ny - 1, ex, n - 1, xi]
+                        else:
+                            scale_up = J_vertface[ey, ex, 0, xi] / J[ey, ex, 0, xi]
+                        h_flux_vert[ey, ex, xi] = h_hllc
+                        v_flux_vert_down[ey, ex, xi] = (
+                            uv_down_flux[ey, ex, xi]
+                            - u_contra_down[ey, ex, xi] * u_cov_down[ey, ex, xi]
+                            + scale_down * delta_down
+                        )
+                        v_flux_vert_up[ey, ex, xi] = (
+                            uv_up_flux[ey, ex, xi]
+                            - u_contra_up[ey, ex, xi] * u_cov_up[ey, ex, xi]
+                            + scale_up * delta_up
+                        )
 
         for ey in range(ny):
             for ex in range(nx + 1):
@@ -789,26 +821,58 @@ if njit is not None:
                     alpha_u_right = xi_x_right[ey, ex, eta] * dxdxi_right[ey, ex, eta] + xi_y_right[ey, ex, eta] * dydxi_right[ey, ex, eta] + xi_z_right[ey, ex, eta] * dzdxi_right[ey, ex, eta]
                     alpha_v_left = xi_x_left[ey, ex, eta] * dxdeta_left[ey, ex, eta] + xi_y_left[ey, ex, eta] * dydeta_left[ey, ex, eta] + xi_z_left[ey, ex, eta] * dzdeta_left[ey, ex, eta]
                     alpha_v_right = xi_x_right[ey, ex, eta] * dxdeta_right[ey, ex, eta] + xi_y_right[ey, ex, eta] * dydeta_right[ey, ex, eta] + xi_z_right[ey, ex, eta] * dzdeta_right[ey, ex, eta]
-                    h_hllc, delta_left, delta_right = _hllc_delta_scalar(
+                    h_hllc, delta_left, delta_right, use_hllc = _hllc_delta_scalar(
                         h_left[ey, ex, eta], vel_left[ey, ex, eta], h_left_flux[ey, ex, eta],
                         u_cov_left[ey, ex, eta], alpha_u_left,
                         h_right[ey, ex, eta], vel_right[ey, ex, eta], h_right_flux[ey, ex, eta],
                         u_cov_right[ey, ex, eta], alpha_u_right,
                         g, froude_switch, h_flux_horz[ey, ex, eta],
                     )
-                    h_flux_horz[ey, ex, eta] = h_hllc
-                    u_flux_horz_left[ey, ex, eta] += delta_left
-                    u_flux_horz_right[ey, ex, eta] += delta_right
-                    h_hllc, delta_left, delta_right = _hllc_delta_scalar(
+                    if use_hllc:
+                        if ex == 0:
+                            scale_left = J_horzface[ey, 0, eta, 0] / J[ey, 0, eta, 0]
+                        else:
+                            scale_left = J_horzface[ey, ex - 1, eta, n - 1] / J[ey, ex - 1, eta, n - 1]
+                        if ex == nx:
+                            scale_right = J_horzface[ey, nx - 1, eta, n - 1] / J[ey, nx - 1, eta, n - 1]
+                        else:
+                            scale_right = J_horzface[ey, ex, eta, 0] / J[ey, ex, eta, 0]
+                        h_flux_horz[ey, ex, eta] = h_hllc
+                        u_flux_horz_left[ey, ex, eta] = (
+                            uv_left_flux[ey, ex, eta]
+                            - v_contra_left[ey, ex, eta] * v_cov_left[ey, ex, eta]
+                            + scale_left * delta_left
+                        )
+                        u_flux_horz_right[ey, ex, eta] = (
+                            uv_right_flux[ey, ex, eta]
+                            - v_contra_right[ey, ex, eta] * v_cov_right[ey, ex, eta]
+                            + scale_right * delta_right
+                        )
+                    h_hllc, delta_left, delta_right, use_hllc = _hllc_delta_scalar(
                         h_left[ey, ex, eta], vel_left[ey, ex, eta], h_left_flux[ey, ex, eta],
                         v_cov_left[ey, ex, eta], alpha_v_left,
                         h_right[ey, ex, eta], vel_right[ey, ex, eta], h_right_flux[ey, ex, eta],
                         v_cov_right[ey, ex, eta], alpha_v_right,
                         g, froude_switch, h_flux_horz[ey, ex, eta],
                     )
-                    h_flux_horz[ey, ex, eta] = h_hllc
-                    v_flux_horz_left[ey, ex, eta] += delta_left
-                    v_flux_horz_right[ey, ex, eta] += delta_right
+                    if use_hllc:
+                        if ex == 0:
+                            scale_left = J_horzface[ey, 0, eta, 0] / J[ey, 0, eta, 0]
+                        else:
+                            scale_left = J_horzface[ey, ex - 1, eta, n - 1] / J[ey, ex - 1, eta, n - 1]
+                        if ex == nx:
+                            scale_right = J_horzface[ey, nx - 1, eta, n - 1] / J[ey, nx - 1, eta, n - 1]
+                        else:
+                            scale_right = J_horzface[ey, ex, eta, 0] / J[ey, ex, eta, 0]
+                        h_flux_horz[ey, ex, eta] = h_hllc
+                        v_flux_horz_left[ey, ex, eta] = (
+                            u_contra_left[ey, ex, eta] * v_cov_left[ey, ex, eta]
+                            + scale_left * delta_left
+                        )
+                        v_flux_horz_right[ey, ex, eta] = (
+                            u_contra_right[ey, ex, eta] * v_cov_right[ey, ex, eta]
+                            + scale_right * delta_right
+                        )
 
         for ey in range(ny):
             for ex in range(nx):
@@ -2998,24 +3062,38 @@ class DGCubedSphereFaceNumpy:
         alpha_u_down = self.eta_x_down * self.dxdxi_down + self.eta_y_down * self.dydxi_down + self.eta_z_down * self.dzdxi_down
         alpha_v_up = self.eta_x_up * self.dxdeta_up + self.eta_y_up * self.dydeta_up + self.eta_z_up * self.dzdeta_up
         alpha_v_down = self.eta_x_down * self.dxdeta_down + self.eta_y_down * self.dydeta_down + self.eta_z_down * self.dzdeta_down
+        vert_scale_up, vert_scale_down = self.make_up_down_arrays(self.J_vertface / self.J)
         h_flux_vert, u_flux_vert_down, u_flux_vert_up, v_flux_vert_down, v_flux_vert_up = _hllc_fluxes_where_froude(
             self.h_down, vel_down, h_down_flux,
-            u_cov_down, v_cov_down, u_flux_vert_down, v_flux_vert_down, alpha_u_down, alpha_v_down,
+            u_cov_down, v_cov_down, u_flux_vert_down, v_flux_vert_down,
+            v_contra_down * u_cov_down,
+            uv_down_flux - u_contra_down * u_cov_down,
+            alpha_u_down, alpha_v_down,
             self.h_up, vel_up, h_up_flux,
-            u_cov_up, v_cov_up, u_flux_vert_up, v_flux_vert_up, alpha_u_up, alpha_v_up,
-            self.g, self.froude_switch, h_flux_vert,
+            u_cov_up, v_cov_up, u_flux_vert_up, v_flux_vert_up,
+            v_contra_up * u_cov_up,
+            uv_up_flux - u_contra_up * u_cov_up,
+            alpha_u_up, alpha_v_up,
+            self.g, self.froude_switch, h_flux_vert, vert_scale_down, vert_scale_up,
         )
 
         alpha_u_left = self.xi_x_left * self.dxdxi_left + self.xi_y_left * self.dydxi_left + self.xi_z_left * self.dzdxi_left
         alpha_u_right = self.xi_x_right * self.dxdxi_right + self.xi_y_right * self.dydxi_right + self.xi_z_right * self.dzdxi_right
         alpha_v_left = self.xi_x_left * self.dxdeta_left + self.xi_y_left * self.dydeta_left + self.xi_z_left * self.dzdeta_left
         alpha_v_right = self.xi_x_right * self.dxdeta_right + self.xi_y_right * self.dydeta_right + self.xi_z_right * self.dzdeta_right
+        horz_scale_right, horz_scale_left = self.make_left_right_arrays(self.J_horzface / self.J)
         h_flux_horz, u_flux_horz_left, u_flux_horz_right, v_flux_horz_left, v_flux_horz_right = _hllc_fluxes_where_froude(
             self.h_left, vel_left, h_left_flux,
-            u_cov_left, v_cov_left, u_flux_horz_left, v_flux_horz_left, alpha_u_left, alpha_v_left,
+            u_cov_left, v_cov_left, u_flux_horz_left, v_flux_horz_left,
+            uv_left_flux - v_contra_left * v_cov_left,
+            u_contra_left * v_cov_left,
+            alpha_u_left, alpha_v_left,
             self.h_right, vel_right, h_right_flux,
-            u_cov_right, v_cov_right, u_flux_horz_right, v_flux_horz_right, alpha_u_right, alpha_v_right,
-            self.g, self.froude_switch, h_flux_horz,
+            u_cov_right, v_cov_right, u_flux_horz_right, v_flux_horz_right,
+            uv_right_flux - v_contra_right * v_cov_right,
+            u_contra_right * v_cov_right,
+            alpha_u_right, alpha_v_right,
+            self.g, self.froude_switch, h_flux_horz, horz_scale_left, horz_scale_right,
         )
 
         # h_flux_vert = 0.5 * (h_up_flux + h_down_flux) - self.a * c_snd_ve * (uv_up_flux - uv_down_flux) / self.g

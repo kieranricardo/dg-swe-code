@@ -28,7 +28,7 @@ def _as_numpy(arr):
     return np.asarray(arr)
 
 
-def _make_solvers(poly_order, grid, tangent_diss):
+def _make_solvers(poly_order, grid, tangent_diss, froude_switch=1.0):
     kwargs = dict(
         poly_order=poly_order,
         nx=grid,
@@ -42,7 +42,28 @@ def _make_solvers(poly_order, grid, tangent_diss):
         dtype=np.float64,
         tangent_diss=tangent_diss,
     )
-    return DGCubedSphereSWE(**kwargs), DGCubedSphereSWENumpy(**kwargs)
+    return DGCubedSphereSWE(**kwargs), DGCubedSphereSWENumpy(
+        **kwargs, froude_switch=froude_switch,
+    )
+
+
+def _make_numpy_solver(
+    poly_order, grid, *, a=0.5, ah=0.25, tangent_diss=True, froude_switch=1.0,
+):
+    return DGCubedSphereSWENumpy(
+        poly_order=poly_order,
+        nx=grid,
+        ny=grid,
+        g=9.81,
+        f=7.2921e-5,
+        eps=0.0,
+        radius=1.0,
+        a=a,
+        ah=ah,
+        dtype=np.float64,
+        tangent_diss=tangent_diss,
+        froude_switch=froude_switch,
+    )
 
 
 def test_numpy_solver_configures_froude_switch():
@@ -190,6 +211,77 @@ def test_numpy_and_numba_residuals_match_for_supercritical_faces():
     numba_out = _residual_pass(numpy_solver, numpy_state, "solve")
 
     _assert_outputs_close("numpy", numpy_out, "numba", numba_out)
+
+
+def test_numpy_and_numba_residuals_match_with_froude_switch_disabled():
+    torch_solver, numpy_solver = _make_solvers(
+        poly_order=3, grid=4, tangent_diss=True, froude_switch=None,
+    )
+    _, numpy_state = _set_random_state(
+        torch_solver, numpy_solver, seed=20260804,
+    )
+
+    numpy_out = _residual_pass(numpy_solver, numpy_state, "solve_numpy")
+    numba_out = _residual_pass(numpy_solver, numpy_state, "solve")
+
+    _assert_outputs_close("numpy", numpy_out, "numba", numba_out)
+
+
+def test_hllc_only_flux_ignores_lmars_parameters():
+    base_solver = _make_numpy_solver(
+        poly_order=2,
+        grid=3,
+        a=0.0,
+        ah=0.0,
+        tangent_diss=False,
+        froude_switch=0.0,
+    )
+    varied_solver = _make_numpy_solver(
+        poly_order=2,
+        grid=3,
+        a=0.75,
+        ah=0.5,
+        tangent_diss=True,
+        froude_switch=0.0,
+    )
+    rng = np.random.default_rng(20260805)
+
+    for name in FACE_NAMES:
+        shape = base_solver.faces[name].J.shape
+        u = 0.2 * rng.standard_normal(shape)
+        v = 0.2 * rng.standard_normal(shape)
+        w = 0.2 * rng.standard_normal(shape)
+        h = 1.0 + 0.2 * rng.random(shape)
+        b = 0.01 * rng.standard_normal(shape)
+        base_solver.faces[name].set_initial_condition(u, v, w, h, b)
+        varied_solver.faces[name].set_initial_condition(u, v, w, h, b)
+
+    base_state = {
+        name: (
+            base_solver.faces[name].u,
+            base_solver.faces[name].v,
+            base_solver.faces[name].w,
+            base_solver.faces[name].h,
+        )
+        for name in FACE_NAMES
+    }
+    varied_state = {
+        name: (
+            varied_solver.faces[name].u,
+            varied_solver.faces[name].v,
+            varied_solver.faces[name].w,
+            varied_solver.faces[name].h,
+        )
+        for name in FACE_NAMES
+    }
+
+    base_numpy = _residual_pass(base_solver, base_state, "solve_numpy")
+    varied_numpy = _residual_pass(varied_solver, varied_state, "solve_numpy")
+    _assert_outputs_close("base HLLC numpy", base_numpy, "varied HLLC numpy", varied_numpy)
+
+    base_numba = _residual_pass(base_solver, base_state, "solve")
+    varied_numba = _residual_pass(varied_solver, varied_state, "solve")
+    _assert_outputs_close("base HLLC numba", base_numba, "varied HLLC numba", varied_numba)
 
 
 def _time_average(fn, repeats):
