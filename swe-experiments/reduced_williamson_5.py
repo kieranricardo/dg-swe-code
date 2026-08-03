@@ -193,6 +193,7 @@ if mode == 'run':
 if mode == 'plot':
 
     fn_template = get_fn_template(day)
+    solver.vorticity_diagnostic = True
     solver.load_restart(fn_template + '.npy', data_dir)
     rel_vort_siac = solver.siac_vorticity(
         include_coriolis=False, 
