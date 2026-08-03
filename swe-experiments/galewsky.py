@@ -7,32 +7,45 @@ import os
 import time
 from mpi4py import MPI
 import cmocean
+import argparse
+
 
 comm = MPI.COMM_WORLD
 rank = comm.Get_rank()
 size = comm.Get_size()
 
-if rank == 0:
-    if not os.path.exists('./plots'): os.makedirs('./plots')
-    if not os.path.exists('./data'): os.makedirs('./data')
-
 plt.rcParams['font.size'] = '12'
 
-mode = 'plot'
-dev = 'cpu'
-
-nx = ny = 101
 
 if size == 1:
     nprocx = nprocy = 1
 else:
     nprocx = nprocy = int(np.sqrt(size // 6))
 
+
+parser = argparse.ArgumentParser()
+parser.add_argument('--order', type=int, help='Polynomial order')
+parser.add_argument('--nx', type=int, help='Number of cells in horizontal')
+parser.add_argument('--plot', action='store_true')
+parser.add_argument('--restart', action='store_true')
+parser.add_argument('--day', type=int, help='Polynomial order')
+args = parser.parse_args()
+
+
+if args.plot:
+    mode = 'plot'
+    day = args.day
+    assert size == 1
+else:
+    mode = 'run'    
+
+nx = ny = args.nx + 1
+poly_order = args.order
+
 eps = 1.3
 g = 9.80616
 f = 7.292e-5
 radius = 6.37122e6
-poly_order = 3
 
 u_0 = 80
 h_0 = 10_000
@@ -81,21 +94,58 @@ def initial_condition(face):
 
     return u, v, w, h
 
+
+def get_fn_template(a, tangent_diss, h_diss, froude_switch=None, day=None):
+    suffix = ''
+
+    suffix = suffix + f'a_{a}'
+    
+    if tangent_diss:
+        suffix = suffix + '_tangent_diss'
+
+    if h_diss:
+        suffix = suffix + '_h_diss'
+
+    if froude_switch is not None:
+        suffix = suffix + f'_hllc_switch_{froude_switch}'
+
+    if day is not None:
+        suffix = suffix + f'_day_{day}'
+
+    return f"galewsky_nx{nx-1}_p{poly_order}_{suffix}"
+
+
+parameters_list = [dict(a=0.5, tangent_diss=True, h_diss=False, froude_switch=None)]
+
 if mode == 'run':
 
-    exp_names = [f'DG_res_tang_diss_6x{nx}x{ny}', f'DG_cntr_res_6x{nx}x{ny}'][:1]
+    for parameters in parameters_list:
 
-    for exp in exp_names:
-        if 'cntr' in exp:
-            a = 0.0
+        a = parameters['a']
+        tangent_diss = parameters['tangent_diss']
+        froude_switch = parameters['froude_switch']
+        h_diss = parameters['h_diss']
+
+        if parameters['h_diss']:
+            ah = 0.5
         else:
-            a = 0.5
+            ah = 0.0
 
+        data_dir = os.path.join('data', get_fn_template(**parameters))
+        plot_dir = os.path.join('plots', get_fn_template(**parameters))
+
+        if rank == 0:
+            if not os.path.exists(data_dir): os.makedirs(data_dir)
+            if not os.path.exists(plot_dir): os.makedirs(plot_dir)
+
+        
         solver = DGCubedSphereSWENumpy(
             poly_order, nx, ny, g, f,
-            eps, device=dev, solution=None, a=a, radius=radius,
-            dtype=np.float64, tangent_diss=True, ah=0.0, nprocx=nprocx, nprocy=nprocy,
+            eps, a=a, radius=radius,
+            dtype=np.float64, tangent_diss=tangent_diss, ah=ah, 
+            nprocx=nprocx, nprocy=nprocy, froude_switch=froude_switch
         )
+
         for face in solver.faces.values():
             face.set_initial_condition(*initial_condition(face))
         solver.boundaries()
@@ -104,8 +154,9 @@ if mode == 'run':
 
         if rank == 0:
             print('Time step:', dt)
-            print('Starting', exp)
-            print('a:', solver.faces['zp'].a, 'res:', nx, ny)
+            print('Starting', get_fn_template(**parameters))
+            print('a:', solver.faces['zp'].a, 'res:', nx, ny, 'froude_switch:', solver.faces['zp'].froude_switch)
+            print('ah:', solver.faces['zp'].ah, 'tangent_diss:', solver.faces['zp'].tangent_diss)
 
         for i in range(20):
             if rank == 0:
@@ -121,93 +172,46 @@ if mode == 'run':
                 print('Walltime:', t1 - t0, 's')
 
             comm.Barrier()
-            fn_template = f"{exp}_day_{i+1}.npy"
-            solver.save_restart(fn_template, 'data')
+            fn_template = get_fn_template(day=i+1, **parameters)
+            solver.save_restart(fn_template, data_dir)
 
-        solver.save_diagnostics(fn_template, 'data')
+        solver.save_diagnostics(fn_template, data_dir)
 
 elif mode == 'plot':
 
     solver = DGCubedSphereSWENumpy(
         poly_order, nx, ny, g, f,
-        eps, device=dev, solution=None, a=0.5, radius=radius,
+        eps, solution=None, a=0.5, radius=radius,
         dtype=np.float64, damping='adaptive'
-    )
-    for face in solver.faces.values():
-        face.set_initial_condition(*initial_condition(face))
-
-    day = 16
-    exp = f'DG_res_tang_diss_6x{nx}x{ny}'
-    fn_template = f"{exp}_day_{day}.npy"
-    solver.load_restart(fn_template, 'data')
-    rel_vort_siac = solver.siac_vorticity(
-        include_coriolis=False, 
-        boundary='sphere',
-        quadrature_order=10,
-        scale=1.0,
     )
 
     lat = np.linspace(-90, 90, 4 * 512)[:, None]
     lon = np.linspace(-180, 180, 4 * 1024)[None, :]
-    vort_plot_siac = solver.evaluate_latlong(lat, lon, rel_vort_siac, degrees=True)
 
-    plt.figure(figsize=(10, 5), dpi=400)
-    plt.title('Relative vorticity (SIAC)')
-    plt.pcolormesh(lon.ravel(), lat.ravel(), vort_plot_siac, cmap=cmocean.cm.curl)
-    plt.xlabel('Longitude')
-    plt.ylabel('Latitude')
-    plt.colorbar()
-    # E0 = solver.integrate(solver.entropy())
+    for parameters in parameters_list:
 
-    # p = 12
-    # solver_hr = DGCubedSphereSWENumpy(
-    #     p, nx, ny, g, f,
-    #     eps, device=dev, solution=None, a=0.5, radius=radius,
-    #     dtype=np.float64, damping='adaptive'
-    # )
+        data_dir = os.path.join('data', get_fn_template(**parameters))
+        plot_dir = os.path.join('plots', get_fn_template(**parameters))
+        if rank == 0:
+            if not os.path.exists(data_dir): os.makedirs(data_dir)
+            if not os.path.exists(plot_dir): os.makedirs(plot_dir)
 
-    # interpolator = Interpolate(3, p)
+        fn_template = get_fn_template(day=day, **parameters) 
+        solver.load_restart(fn_template + '.npy', data_dir)
+        rel_vort_siac = solver.siac_vorticity(
+            include_coriolis=False, 
+            boundary='sphere',
+            quadrature_order=10,
+            scale=1.0,
+        )
 
-    # exp_names = [f'DG_res_6x{nx}x{ny}', f'DG_cntr_res_6x{nx}x{ny}'][:1]
-    # labels = ['Diss.', 'Cons.']
+        vort_plot_siac = solver.evaluate_latlong(lat, lon, rel_vort_siac, degrees=True)
 
-    # for exp, label in zip(exp_names, labels):
-    #     fn_template = f"{exp}_day_{20}.npy"
-    #     solver.plot_diagnostics(fn_template, 'data', 1, label)
-
-    # # plt.savefig(f'./plots/galewsky_conservation.png')
-
-    # vmin = -0.00015; vmax = 0.00015
-    # plot_func = lambda s: s.vorticity() - s.f
-
-    # def interpolate_plot_func(s):
-    #     data = plot_func(solver.faces[s.name])
-    #     return interpolator.torch_interpolate(data)
-
-    # day = 7
-
-    # for exp in exp_names:
-
-    #     fn_template = f"{exp}_day_{day}.npy"
-    #     solver.load_restart(fn_template, 'data')
-    #     E = solver.integrate(solver.entropy())
-    #     print(f'{exp} relative energy loss rate:', (E - E0) / (E0 * day * 24 * 3600))
-    #     print(f'{exp} adjusted energy loss rate (Wm^-2):', 3e9 * (E - E0) / (E0 * day * 24 * 3600))
-
-    #     for name, face in solver.faces.items():
-    #         data = [face.u, face.v, face.w, face.h]
-    #         data = [interpolator.torch_interpolate(tnsr).numpy() for tnsr in data]
-    #         solver_hr.faces[name].set_initial_condition(*data)
-
-    #     solver_hr.boundaries()
-
-    #     fig = plt.figure()
-    #     ax = fig.add_subplot(111)
-    #     ax.set_xlabel("x (km)")
-    #     ax.set_ylabel("y (km)")
-
-    #     im = solver_hr.triangular_plot(ax, vmin=vmin, vmax=vmax, latlong=False, plot_func=interpolate_plot_func)
-    #     plt.colorbar(im[0])
-        # plt.savefig(f'./plots/vort_galewsky_{exp}_{int(day)}_days.png')
-    plt.savefig(f'./plots/vort_galewsky_{exp}_{int(day)}_days.png')
-    # plt.show()
+        plt.figure(figsize=(10, 5), dpi=400)
+        plt.title('Relative vorticity (SIAC)')
+        plt.pcolormesh(lon.ravel(), lat.ravel(), vort_plot_siac, cmap=cmocean.cm.curl)
+        plt.xlabel('Longitude')
+        plt.ylabel('Latitude')
+        plt.colorbar()
+        
+        plt.savefig(os.path.join(plot_dir, f'vort_siac_galewsky_{fn_template}.png'))
