@@ -956,7 +956,7 @@ class DGCubedSphereSWENumpy:
     def __init__(
             self, poly_order, nx, ny, g, f, eps, radius=1.0, device='cpu',
             solution=None, a=0.0, ah=0.0, dtype=np.float64,
-            tangent_diss=False, froude_switch=1.0, nprocx=1, nprocy=1, comm=None, **kwargs):
+            tangent_diss=False, froude_switch=None, nprocx=1, nprocy=1, comm=None, **kwargs):
 
         self.face_names = ['zp', 'zn', 'xp', 'xn', 'yp', 'yn']
         self.nprocx = nprocx

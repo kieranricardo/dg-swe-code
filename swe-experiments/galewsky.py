@@ -115,7 +115,11 @@ def get_fn_template(a, tangent_diss, h_diss, froude_switch=None, day=None):
     return f"galewsky_nx{nx-1}_p{poly_order}_{suffix}"
 
 
-parameters_list = [dict(a=0.5, tangent_diss=True, h_diss=False, froude_switch=None)]
+parameters_list = [
+    # dict(a=0.5, tangent_diss=True, h_diss=False, froude_switch=None),
+    dict(a=0.5, tangent_diss=True, h_diss=True, froude_switch=None),
+    # dict(a=0.5, tangent_diss=True, h_diss=False, froude_switch=0.0),
+]
 
 if mode == 'run':
 
@@ -198,20 +202,49 @@ elif mode == 'plot':
 
         fn_template = get_fn_template(day=day, **parameters) 
         solver.load_restart(fn_template + '.npy', data_dir)
+
+        def _plot_func_helper(data, name, title, cmap, vmin=None, vmax=None):
+            plt.figure(figsize=(10, 5), dpi=400)
+            plt.title(title)
+            plt.pcolormesh(lon.ravel(), lat.ravel(), data, cmap=cmap, vmin=vmin, vmax=vmax)
+            plt.xlabel('Longitude')
+            plt.ylabel('Latitude')
+            plt.colorbar()
+
+            plt.savefig(f'./{plot_dir}/{name}_{fn_template}.png')
+
         rel_vort_siac = solver.siac_vorticity(
             include_coriolis=False, 
             boundary='sphere',
             quadrature_order=10,
-            scale=1.0,
+            scale=0.75,
         )
-
         vort_plot_siac = solver.evaluate_latlong(lat, lon, rel_vort_siac, degrees=True)
+        vort_plot = solver.evaluate_latlong(lat, lon, solver.vorticity(), degrees=True)
+        vort_plot -= 2 * 7.292e-5 * np.sin(lat * np.pi / 180)
+        h_plot = solver.evaluate_latlong(lat, lon, dict((name, face.h) for name, face in solver.faces.items()), degrees=True)
 
-        plt.figure(figsize=(10, 5), dpi=400)
-        plt.title('Relative vorticity (SIAC)')
-        plt.pcolormesh(lon.ravel(), lat.ravel(), vort_plot_siac, cmap=cmocean.cm.curl)
-        plt.xlabel('Longitude')
-        plt.ylabel('Latitude')
-        plt.colorbar()
+        _plot_func_helper(vort_plot_siac, 'siac_vort', 'Relative vorticity (SIAC)', cmocean.cm.curl, vmin=None, vmax=None)
+        _plot_func_helper(vort_plot, 'vort', 'Relative vorticity', cmocean.cm.curl, vmin=None, vmax=None)
         
-        plt.savefig(os.path.join(plot_dir, f'vort_siac_galewsky_{fn_template}.png'))
+        _plot_func_helper(h_plot, 'h', 'Height', cmocean.cm.deep)
+
+        u_plot = solver.evaluate_latlong(lat, lon, dict((name, face.u) for name, face in solver.faces.items()), degrees=True)
+        v_plot = solver.evaluate_latlong(lat, lon, dict((name, face.v) for name, face in solver.faces.items()), degrees=True)
+        w_plot = solver.evaluate_latlong(lat, lon, dict((name, face.w) for name, face in solver.faces.items()), degrees=True)
+
+        long_vec_x = np.cos(lon * np.pi / 180)
+        long_vec_y = np.sin(lon * np.pi / 180)
+        long_vec_z = 0 * lon
+
+        lat_vec_x = -np.sin(lat * np.pi / 180) * np.sin(lon * np.pi / 180)
+        lat_vec_y = np.sin(lat * np.pi / 180) * np.cos(lon * np.pi / 180)
+        lat_vec_z = np.cos(lat * np.pi / 180)
+
+        zonal_vel = long_vec_x * u_plot + long_vec_y * v_plot + long_vec_z * w_plot
+        meridional_vel = lat_vec_x * u_plot + lat_vec_y * v_plot + lat_vec_z * w_plot
+        speed = np.sqrt(zonal_vel**2 + meridional_vel**2)
+
+        _plot_func_helper(zonal_vel, 'zonal_vel', 'Zonal velocity', cmocean.cm.delta)
+        _plot_func_helper(meridional_vel, 'meridional_vel', 'Meridional velocity', cmocean.cm.delta)
+        _plot_func_helper(speed, 'speed', 'Speed', cmocean.cm.speed)

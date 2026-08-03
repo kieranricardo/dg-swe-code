@@ -17,22 +17,25 @@ u_0 = 0.5
 h_0 = 5960.0
 s_0 = 3000
 poly_order = 3
+a = 0.5
 
 tangent_diss = True
 h_diss = True
+froude_switch = None
 
 if h_diss:
     ah = 0.5
 else:
     ah = 0.0
 
-nx = ny = 112 + 1
-max_n = 800
+
+nx = ny = 32 + 1
+max_n = 400
 nlat = max(4 * max_n + 1, 2 * (ny - 1) * (poly_order + 1) + 1)
 nlon = max(8 * max_n + 2, 4 * (nx - 1) * (poly_order + 1) + 2)
 
 
-def get_fn_template(day=None):
+def get_rw_fn_template(day=None):
     suffix = ''
     if tangent_diss:
         suffix = suffix + 'tangent_diss'
@@ -50,12 +53,37 @@ def get_fn_template(day=None):
     else:
         return f"reduced_williamson_5_day_nx{nx-1}_p{poly_order}_{suffix}_{day}"
 
+
+def get_galewsky_fn_template(day=None):
+    suffix = ''
+
+    suffix = suffix + f'a_{a}'
+    
+    if tangent_diss:
+        suffix = suffix + '_tangent_diss'
+
+    if h_diss:
+        suffix = suffix + '_h_diss'
+
+    if froude_switch is not None:
+        suffix = suffix + f'_froude_switch_{froude_switch}'
+
+    if day is not None:
+        suffix = suffix + f'_day_{day}'
+
+    return f"galewsky_nx{nx-1}_p{poly_order}_{suffix}"
+
+
+
 # day = 16
 # exp_name = f'DG_res_tang_diss_6x{nx}x{ny}'
 # fn_template = f"{exp_name}_day_{day}.npy"
 # out_name = 'galewsky'
+get_fn_template = get_galewsky_fn_template
+fn_template = get_fn_template(16)
 
-fn_template = get_fn_template(1080)
+# get_fn_template = get_rw_fn_template
+# fn_template = get_fn_template(1080)
 
 data_dir = os.path.join('data', get_fn_template())
 plot_dir = os.path.join('plots', get_fn_template())
@@ -307,7 +335,7 @@ def main():
 
     solver = DGCubedSphereSWENumpy(
         poly_order, nx, ny, g, f,
-        eps, a=0.5, ah=ah, radius=radius,
+        eps, radius=radius, froude_switch=0.5
         dtype=np.float64, tangent_diss=tangent_diss
     )
 

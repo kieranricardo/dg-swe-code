@@ -19,15 +19,7 @@ if size == 1:
 else:
     nprocx = nprocy = int(np.sqrt(size // 6))
 
-# can use cfl = 1.6 upto day 3400
-# cfl = 0.4 definitely works
-# does cfl = 0.8 work?
-# Froude numbers get high ~4.4 at day 3500
-# even accounting for possible spuriously low h, 
-# replacing h = max(h_now, h_initial.min())
-# Froude numbers are ~2
-
-cfl = 0.8
+cfl = 1.3
 tangent_diss = True
 h_diss = True
 
@@ -161,7 +153,7 @@ solver = DGCubedSphereSWENumpy(
     poly_order, nx, ny, g, f,
     eps=0.0, a=0.5, ah=ah, radius=radius,
     dtype=np.float64, tangent_diss=tangent_diss,
-    nprocx=nprocx, nprocy=nprocy
+    nprocx=nprocx, nprocy=nprocy, froude_switch=None
 )
 
 for face in solver.faces.values():
