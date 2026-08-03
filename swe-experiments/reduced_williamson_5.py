@@ -44,6 +44,7 @@ elif args.restart:
     i_start = args.day
 else:
     mode = 'run'    
+    day = args.day
 
 nx = ny = args.nx + 1
 poly_order = args.order
@@ -165,7 +166,7 @@ if rank == 0:
 
 if mode == 'run':
     t0 = time.time()
-    for i in range(1080):
+    for i in range(day):
         if rank == 0:
             print('Running day', i + 1)
         tend = solver.time + 3600 * 24
