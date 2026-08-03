@@ -28,7 +28,7 @@ def _as_numpy(arr):
     return np.asarray(arr)
 
 
-def _make_solvers(poly_order, grid, tangent_diss):
+def _make_solvers(poly_order, grid, tangent_diss, ah=0.25, a=0.5):
     kwargs = dict(
         poly_order=poly_order,
         nx=grid,
@@ -37,8 +37,8 @@ def _make_solvers(poly_order, grid, tangent_diss):
         f=7.2921e-5,
         eps=0.0,
         radius=1.0,
-        a=0.5,
-        ah=0.25,
+        a=a,
+        ah=ah,
         dtype=np.float64,
         tangent_diss=tangent_diss,
     )
@@ -119,11 +119,20 @@ def _assert_outputs_close(reference_name, reference, candidate_name, candidate):
 
 
 @pytest.mark.parametrize(
-    ("poly_order", "grid", "tangent_diss"),
-    [(1, 4, False), (3, 4, True)],
+    ("poly_order", "grid"),
+    [(1, 4), (3, 4)],
 )
-def test_torch_numpy_and_numba_residuals_match(poly_order, grid, tangent_diss):
-    torch_solver, numpy_solver = _make_solvers(poly_order, grid, tangent_diss)
+@pytest.mark.parametrize(
+    ("ah", "tangent_diss"),
+    [
+        (0.0, False),
+        (0.0, True),
+        (0.5, False),
+        (0.5, True),
+    ],
+)
+def test_torch_numpy_and_numba_residuals_match(poly_order, grid, ah, tangent_diss):
+    torch_solver, numpy_solver = _make_solvers(poly_order, grid, tangent_diss, ah=ah, a=ah)
     torch_state, numpy_state = _set_random_state(
         torch_solver, numpy_solver, seed=1100 + 100 * poly_order + grid
     )
@@ -132,8 +141,9 @@ def test_torch_numpy_and_numba_residuals_match(poly_order, grid, tangent_diss):
     numpy_out = _residual_pass(numpy_solver, numpy_state, "solve_numpy")
     numba_out = _residual_pass(numpy_solver, numpy_state, "solve")
 
-    # _assert_outputs_close("torch", torch_out, "numpy", numpy_out)
-    # _assert_outputs_close("torch", torch_out, "numba", numba_out)
+    if (not tangent_diss) and (ah == 0.0):
+        _assert_outputs_close("torch", torch_out, "numpy", numpy_out)
+        _assert_outputs_close("torch", torch_out, "numba", numba_out)
     _assert_outputs_close("numpy", numpy_out, "numba", numba_out)
 
 
