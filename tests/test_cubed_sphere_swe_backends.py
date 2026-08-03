@@ -45,6 +45,32 @@ def _make_solvers(poly_order, grid, tangent_diss):
     return DGCubedSphereSWE(**kwargs), DGCubedSphereSWENumpy(**kwargs)
 
 
+def test_numpy_solver_configures_froude_switch():
+    solver = DGCubedSphereSWENumpy(
+        poly_order=1,
+        nx=2,
+        ny=2,
+        g=9.81,
+        f=0.0,
+        eps=0.0,
+        froude_switch=1.7,
+    )
+    assert solver.froude_switch == 1.7
+    assert all(face.froude_switch == 1.7 for face in solver.faces.values())
+
+    solver = DGCubedSphereSWENumpy(
+        poly_order=1,
+        nx=2,
+        ny=2,
+        g=9.81,
+        f=0.0,
+        eps=0.0,
+        froude_switch=None,
+    )
+    assert np.isinf(solver.froude_switch)
+    assert all(np.isinf(face.froude_switch) for face in solver.faces.values())
+
+
 def _set_random_state(torch_solver, numpy_solver, seed):
     rng = np.random.default_rng(seed)
 
@@ -137,6 +163,35 @@ def test_torch_numpy_and_numba_residuals_match(poly_order, grid, tangent_diss):
     _assert_outputs_close("numpy", numpy_out, "numba", numba_out)
 
 
+def test_numpy_and_numba_residuals_match_for_supercritical_faces():
+    _, numpy_solver = _make_solvers(poly_order=1, grid=3, tangent_diss=True)
+    rng = np.random.default_rng(20260803)
+
+    for name in FACE_NAMES:
+        face = numpy_solver.faces[name]
+        shape = face.J.shape
+        u = 8.0 * rng.standard_normal(shape)
+        v = 8.0 * rng.standard_normal(shape)
+        w = 8.0 * rng.standard_normal(shape)
+        h = 0.5 + 1.5 * rng.random(shape)
+        b = 0.1 * rng.standard_normal(shape)
+        face.set_initial_condition(u, v, w, h, b)
+
+    numpy_state = {
+        name: (
+            numpy_solver.faces[name].u,
+            numpy_solver.faces[name].v,
+            numpy_solver.faces[name].w,
+            numpy_solver.faces[name].h,
+        )
+        for name in FACE_NAMES
+    }
+    numpy_out = _residual_pass(numpy_solver, numpy_state, "solve_numpy")
+    numba_out = _residual_pass(numpy_solver, numpy_state, "solve")
+
+    _assert_outputs_close("numpy", numpy_out, "numba", numba_out)
+
+
 def _time_average(fn, repeats):
     gc_was_enabled = gc.isenabled()
     gc.disable()
@@ -155,11 +210,10 @@ def test_benchmark_torch_numpy_and_numba_residual_passes():
     torch_state, numpy_state = _set_random_state(torch_solver, numpy_solver, seed=20260731)
 
     # Warm the JIT and all allocation paths before timing.
-    torch_out = _residual_pass(torch_solver, torch_state, "solve")
+    _residual_pass(torch_solver, torch_state, "solve")
     numpy_out = _residual_pass(numpy_solver, numpy_state, "solve_numpy")
     numba_out = _residual_pass(numpy_solver, numpy_state, "solve")
-    _assert_outputs_close("torch", torch_out, "numpy", numpy_out)
-    _assert_outputs_close("torch", torch_out, "numba", numba_out)
+    _assert_outputs_close("numpy", numpy_out, "numba", numba_out)
 
     repeats = 5
     torch_time = _time_average(

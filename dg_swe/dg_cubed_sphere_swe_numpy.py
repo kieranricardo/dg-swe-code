@@ -26,6 +26,98 @@ def _norm_l2(vec):
     return np.sqrt(sum(a * a for a in vec))
 
 
+def _hllc_fluxes_where_froude(
+    h_l, vel_l, h_flux_l,
+    q0_l, q1_l, q0_flux_l, q1_flux_l, alpha0_l, alpha1_l,
+    h_r, vel_r, h_flux_r,
+    q0_r, q1_r, q0_flux_r, q1_flux_r, alpha0_r, alpha1_r,
+    g, froude_switch, h_flux,
+):
+    c_l = np.sqrt(g * h_l)
+    c_r = np.sqrt(g * h_r)
+    froude_l = np.abs(vel_l) / c_l
+    froude_r = np.abs(vel_r) / c_r
+    use_hllc = (froude_l >= froude_switch) | (froude_r >= froude_switch)
+    if not np.any(use_hllc):
+        return h_flux, q0_flux_l, q0_flux_r, q1_flux_l, q1_flux_r
+
+    s_l = np.minimum(vel_l - c_l, vel_r - c_r)
+    s_r = np.maximum(vel_l + c_l, vel_r + c_r)
+    p_l = 0.5 * g * h_l * h_l
+    p_r = 0.5 * g * h_r * h_r
+    denom = h_l * (s_l - vel_l) - h_r * (s_r - vel_r)
+    s_m = np.zeros_like(h_l)
+    np.divide(
+        p_r - p_l + h_l * vel_l * (s_l - vel_l) - h_r * vel_r * (s_r - vel_r),
+        denom,
+        out=s_m,
+        where=denom != 0.0,
+    )
+
+    h_star_l = h_l.copy()
+    h_star_r = h_r.copy()
+    np.divide(
+        h_l * (s_l - vel_l),
+        s_l - s_m,
+        out=h_star_l,
+        where=(s_l - s_m) != 0.0,
+    )
+    np.divide(
+        h_r * (s_r - vel_r),
+        s_r - s_m,
+        out=h_star_r,
+        where=(s_r - s_m) != 0.0,
+    )
+
+    left = s_l >= 0.0
+    left_star = (s_l < 0.0) & (s_m >= 0.0)
+    right_star = (s_m < 0.0) & (s_r > 0.0)
+
+    h_hllc = np.where(
+        left,
+        h_flux_l,
+        np.where(
+            left_star,
+            h_flux_l + s_l * (h_star_l - h_l),
+            np.where(right_star, h_flux_r + s_r * (h_star_r - h_r), h_flux_r),
+        ),
+    )
+
+    def component_flux(q_l, q_r, alpha_l, alpha_r):
+        flux_l = h_flux_l * q_l + p_l * alpha_l
+        flux_r = h_flux_r * q_r + p_r * alpha_r
+        q_star_l = q_l + alpha_l * (s_m - vel_l)
+        q_star_r = q_r + alpha_r * (s_m - vel_r)
+        return np.where(
+            left,
+            flux_l,
+            np.where(
+                left_star,
+                flux_l + s_l * (h_star_l * q_star_l - h_l * q_l),
+                np.where(
+                    right_star,
+                    flux_r + s_r * (h_star_r * q_star_r - h_r * q_r),
+                    flux_r,
+                ),
+            ),
+        ), flux_l, flux_r
+
+    q0_hllc, q0_cons_l, q0_cons_r = component_flux(q0_l, q0_r, alpha0_l, alpha0_r)
+    q1_hllc, q1_cons_l, q1_cons_r = component_flux(q1_l, q1_r, alpha1_l, alpha1_r)
+
+    q0_delta_l = ((q0_hllc - q0_cons_l) - q0_l * (h_hllc - h_flux_l)) / h_l
+    q0_delta_r = ((q0_hllc - q0_cons_r) - q0_r * (h_hllc - h_flux_r)) / h_r
+    q1_delta_l = ((q1_hllc - q1_cons_l) - q1_l * (h_hllc - h_flux_l)) / h_l
+    q1_delta_r = ((q1_hllc - q1_cons_r) - q1_r * (h_hllc - h_flux_r)) / h_r
+
+    h_flux = np.where(use_hllc, h_hllc, h_flux)
+    q0_flux_l = np.where(use_hllc, q0_flux_l + q0_delta_l, q0_flux_l)
+    q0_flux_r = np.where(use_hllc, q0_flux_r + q0_delta_r, q0_flux_r)
+    q1_flux_l = np.where(use_hllc, q1_flux_l + q1_delta_l, q1_flux_l)
+    q1_flux_r = np.where(use_hllc, q1_flux_r + q1_delta_r, q1_flux_r)
+    return h_flux, q0_flux_l, q0_flux_r, q1_flux_l, q1_flux_r
+
+
 def _positive_part_power(x, degree):
     x = np.asarray(x, dtype=float)
     out = np.zeros_like(x, dtype=float)
@@ -373,6 +465,71 @@ def cross_product(vec1, vec2):
 
 if njit is not None:
     @njit(cache=True)
+    def _hllc_delta_scalar(
+        h_l, vel_l, h_flux_l, q_l, alpha_l,
+        h_r, vel_r, h_flux_r, q_r, alpha_r,
+        g, froude_switch, h_flux_current,
+    ):
+        c_l = np.sqrt(g * h_l)
+        c_r = np.sqrt(g * h_r)
+        if abs(vel_l) / c_l < froude_switch and abs(vel_r) / c_r < froude_switch:
+            return h_flux_current, 0.0, 0.0
+
+        s_l = vel_l - c_l
+        s_l_candidate = vel_r - c_r
+        if s_l_candidate < s_l:
+            s_l = s_l_candidate
+        s_r = vel_l + c_l
+        s_r_candidate = vel_r + c_r
+        if s_r_candidate > s_r:
+            s_r = s_r_candidate
+
+        p_l = 0.5 * g * h_l * h_l
+        p_r = 0.5 * g * h_r * h_r
+        denom = h_l * (s_l - vel_l) - h_r * (s_r - vel_r)
+        if denom == 0.0:
+            return h_flux_current, 0.0, 0.0
+        s_m = (
+            p_r - p_l
+            + h_l * vel_l * (s_l - vel_l)
+            - h_r * vel_r * (s_r - vel_r)
+        ) / denom
+
+        h_star_l = h_l
+        if s_l != s_m:
+            h_star_l = h_l * (s_l - vel_l) / (s_l - s_m)
+        h_star_r = h_r
+        if s_r != s_m:
+            h_star_r = h_r * (s_r - vel_r) / (s_r - s_m)
+
+        if s_l >= 0.0:
+            h_hllc = h_flux_l
+        elif s_m >= 0.0:
+            h_hllc = h_flux_l + s_l * (h_star_l - h_l)
+        elif s_r > 0.0:
+            h_hllc = h_flux_r + s_r * (h_star_r - h_r)
+        else:
+            h_hllc = h_flux_r
+
+        flux_l = h_flux_l * q_l + p_l * alpha_l
+        flux_r = h_flux_r * q_r + p_r * alpha_r
+        q_star_l = q_l + alpha_l * (s_m - vel_l)
+        q_star_r = q_r + alpha_r * (s_m - vel_r)
+        if s_l >= 0.0:
+            q_hllc = flux_l
+        elif s_m >= 0.0:
+            q_hllc = flux_l + s_l * (h_star_l * q_star_l - h_l * q_l)
+        elif s_r > 0.0:
+            q_hllc = flux_r + s_r * (h_star_r * q_star_r - h_r * q_r)
+        else:
+            q_hllc = flux_r
+
+        delta_l = ((q_hllc - flux_l) - q_l * (h_hllc - h_flux_l)) / h_l
+        delta_r = ((q_hllc - flux_r) - q_r * (h_hllc - h_flux_r)) / h_r
+        return h_hllc, delta_l, delta_r
+
+
+    @njit(cache=True)
     def _solve_numba_kernel(
         u, v, w, h, b,
         D, edge_weights, endpoint_weight, J, Jw,
@@ -392,14 +549,9 @@ if njit is not None:
         dxdxi_right, dydxi_right, dzdxi_right, dxdxi_left, dydxi_left, dzdxi_left,
         dxdeta_up, dydeta_up, dzdeta_up, dxdeta_down, dydeta_down, dzdeta_down,
         dxdeta_right, dydeta_right, dzdeta_right, dxdeta_left, dydeta_left, dzdeta_left,
-        g, a, ah, tangent_diss,
+        g, a, ah, tangent_diss, froude_switch,
     ):
         ny, nx, n, _ = u.shape
-
-        if tangent_diss:
-            a_t = 0.5
-        else:
-            a_t = 0.0
 
         h_xcontra_J = np.empty_like(u)
         h_ycontra_J = np.empty_like(u)
@@ -454,6 +606,15 @@ if njit is not None:
         v_contra_down = np.empty((ny + 1, nx, n), dtype=u.dtype)
         v_contra_right = np.empty((ny, nx + 1, n), dtype=u.dtype)
         v_contra_left = np.empty((ny, nx + 1, n), dtype=u.dtype)
+
+        u_flux_vert_up = np.empty((ny + 1, nx, n), dtype=u.dtype)
+        u_flux_vert_down = np.empty((ny + 1, nx, n), dtype=u.dtype)
+        v_flux_vert_up = np.empty((ny + 1, nx, n), dtype=u.dtype)
+        v_flux_vert_down = np.empty((ny + 1, nx, n), dtype=u.dtype)
+        u_flux_horz_right = np.empty((ny, nx + 1, n), dtype=u.dtype)
+        u_flux_horz_left = np.empty((ny, nx + 1, n), dtype=u.dtype)
+        v_flux_horz_right = np.empty((ny, nx + 1, n), dtype=u.dtype)
+        v_flux_horz_left = np.empty((ny, nx + 1, n), dtype=u.dtype)
 
         for ey in range(ny):
             for ex in range(nx):
@@ -518,7 +679,9 @@ if njit is not None:
                     ) + g * h_down[ey, ex, xi]
                     vel_up[ey, ex, xi] = h_up_flux[ey, ex, xi] / h_up[ey, ex, xi]
                     vel_down[ey, ex, xi] = h_down_flux[ey, ex, xi] / h_down[ey, ex, xi]
-                    c_snd = 0.5 * (np.sqrt(g * h_up[ey, ex, xi]) + np.sqrt(g * h_down[ey, ex, xi]))
+                    c_up = np.sqrt(g * h_up[ey, ex, xi])
+                    c_down = np.sqrt(g * h_down[ey, ex, xi])
+                    c_snd = 0.5 * (c_up + c_down)
                     h_ve[ey, ex, xi] = 0.5 * (h_up[ey, ex, xi] + h_down[ey, ex, xi])
                     c_adv_vert[ey, ex, xi] = 0.5 * (h_up[ey, ex, xi] * vel_up[ey, ex, xi] + h_down[ey, ex, xi] * vel_down[ey, ex, xi]) / h_ve[ey, ex, xi]
 
@@ -533,6 +696,43 @@ if njit is not None:
                     u_contra_down[ey, ex, xi] = u_down[ey, ex, xi] * dxidx_down[ey, ex, xi] + v_down[ey, ex, xi] * dxidy_down[ey, ex, xi] + w_down[ey, ex, xi] * dxidz_down[ey, ex, xi]
                     v_contra_up[ey, ex, xi] = u_up[ey, ex, xi] * detadx_up[ey, ex, xi] + v_up[ey, ex, xi] * detady_up[ey, ex, xi] + w_up[ey, ex, xi] * detadz_up[ey, ex, xi]
                     v_contra_down[ey, ex, xi] = u_down[ey, ex, xi] * detadx_down[ey, ex, xi] + v_down[ey, ex, xi] * detady_down[ey, ex, xi] + w_down[ey, ex, xi] * detadz_down[ey, ex, xi]
+
+                    if tangent_diss:
+                        if c_adv_vert[ey, ex, xi] < 0.0:
+                            avg_tan_cov = u_cov_up[ey, ex, xi]
+                        else:
+                            avg_tan_cov = u_cov_down[ey, ex, xi]
+                    else:
+                        avg_tan_cov = 0.5 * (u_cov_up[ey, ex, xi] + u_cov_down[ey, ex, xi])
+                    u_flux_vert_up[ey, ex, xi] = v_contra_up[ey, ex, xi] * avg_tan_cov
+                    u_flux_vert_down[ey, ex, xi] = v_contra_down[ey, ex, xi] * avg_tan_cov
+                    v_flux_vert_up[ey, ex, xi] = uv_flux_vert[ey, ex, xi] - u_contra_up[ey, ex, xi] * avg_tan_cov
+                    v_flux_vert_down[ey, ex, xi] = uv_flux_vert[ey, ex, xi] - u_contra_down[ey, ex, xi] * avg_tan_cov
+
+                    alpha_u_up = eta_x_up[ey, ex, xi] * dxdxi_up[ey, ex, xi] + eta_y_up[ey, ex, xi] * dydxi_up[ey, ex, xi] + eta_z_up[ey, ex, xi] * dzdxi_up[ey, ex, xi]
+                    alpha_u_down = eta_x_down[ey, ex, xi] * dxdxi_down[ey, ex, xi] + eta_y_down[ey, ex, xi] * dydxi_down[ey, ex, xi] + eta_z_down[ey, ex, xi] * dzdxi_down[ey, ex, xi]
+                    alpha_v_up = eta_x_up[ey, ex, xi] * dxdeta_up[ey, ex, xi] + eta_y_up[ey, ex, xi] * dydeta_up[ey, ex, xi] + eta_z_up[ey, ex, xi] * dzdeta_up[ey, ex, xi]
+                    alpha_v_down = eta_x_down[ey, ex, xi] * dxdeta_down[ey, ex, xi] + eta_y_down[ey, ex, xi] * dydeta_down[ey, ex, xi] + eta_z_down[ey, ex, xi] * dzdeta_down[ey, ex, xi]
+                    h_hllc, delta_down, delta_up = _hllc_delta_scalar(
+                        h_down[ey, ex, xi], vel_down[ey, ex, xi], h_down_flux[ey, ex, xi],
+                        u_cov_down[ey, ex, xi], alpha_u_down,
+                        h_up[ey, ex, xi], vel_up[ey, ex, xi], h_up_flux[ey, ex, xi],
+                        u_cov_up[ey, ex, xi], alpha_u_up,
+                        g, froude_switch, h_flux_vert[ey, ex, xi],
+                    )
+                    h_flux_vert[ey, ex, xi] = h_hllc
+                    u_flux_vert_down[ey, ex, xi] += delta_down
+                    u_flux_vert_up[ey, ex, xi] += delta_up
+                    h_hllc, delta_down, delta_up = _hllc_delta_scalar(
+                        h_down[ey, ex, xi], vel_down[ey, ex, xi], h_down_flux[ey, ex, xi],
+                        v_cov_down[ey, ex, xi], alpha_v_down,
+                        h_up[ey, ex, xi], vel_up[ey, ex, xi], h_up_flux[ey, ex, xi],
+                        v_cov_up[ey, ex, xi], alpha_v_up,
+                        g, froude_switch, h_flux_vert[ey, ex, xi],
+                    )
+                    h_flux_vert[ey, ex, xi] = h_hllc
+                    v_flux_vert_down[ey, ex, xi] += delta_down
+                    v_flux_vert_up[ey, ex, xi] += delta_up
 
         for ey in range(ny):
             for ex in range(nx + 1):
@@ -555,7 +755,9 @@ if njit is not None:
                     ) + g * h_left[ey, ex, eta]
                     vel_right[ey, ex, eta] = h_right_flux[ey, ex, eta] / h_right[ey, ex, eta]
                     vel_left[ey, ex, eta] = h_left_flux[ey, ex, eta] / h_left[ey, ex, eta]
-                    c_snd = 0.5 * (np.sqrt(g * h_right[ey, ex, eta]) + np.sqrt(g * h_left[ey, ex, eta]))
+                    c_right = np.sqrt(g * h_right[ey, ex, eta])
+                    c_left = np.sqrt(g * h_left[ey, ex, eta])
+                    c_snd = 0.5 * (c_right + c_left)
                     h_ho[ey, ex, eta] = 0.5 * (h_right[ey, ex, eta] + h_left[ey, ex, eta])
                     c_adv_horz[ey, ex, eta] = 0.5 * (h_right[ey, ex, eta] * vel_right[ey, ex, eta] + h_left[ey, ex, eta] * vel_left[ey, ex, eta]) / h_ho[ey, ex, eta]
 
@@ -571,6 +773,43 @@ if njit is not None:
                     v_contra_right[ey, ex, eta] = u_right[ey, ex, eta] * detadx_right[ey, ex, eta] + v_right[ey, ex, eta] * detady_right[ey, ex, eta] + w_right[ey, ex, eta] * detadz_right[ey, ex, eta]
                     v_contra_left[ey, ex, eta] = u_left[ey, ex, eta] * detadx_left[ey, ex, eta] + v_left[ey, ex, eta] * detady_left[ey, ex, eta] + w_left[ey, ex, eta] * detadz_left[ey, ex, eta]
 
+                    if tangent_diss:
+                        if c_adv_horz[ey, ex, eta] < 0.0:
+                            avg_tan_cov = v_cov_right[ey, ex, eta]
+                        else:
+                            avg_tan_cov = v_cov_left[ey, ex, eta]
+                    else:
+                        avg_tan_cov = 0.5 * (v_cov_right[ey, ex, eta] + v_cov_left[ey, ex, eta])
+                    u_flux_horz_right[ey, ex, eta] = uv_flux_horz[ey, ex, eta] - v_contra_right[ey, ex, eta] * avg_tan_cov
+                    u_flux_horz_left[ey, ex, eta] = uv_flux_horz[ey, ex, eta] - v_contra_left[ey, ex, eta] * avg_tan_cov
+                    v_flux_horz_right[ey, ex, eta] = u_contra_right[ey, ex, eta] * avg_tan_cov
+                    v_flux_horz_left[ey, ex, eta] = u_contra_left[ey, ex, eta] * avg_tan_cov
+
+                    alpha_u_left = xi_x_left[ey, ex, eta] * dxdxi_left[ey, ex, eta] + xi_y_left[ey, ex, eta] * dydxi_left[ey, ex, eta] + xi_z_left[ey, ex, eta] * dzdxi_left[ey, ex, eta]
+                    alpha_u_right = xi_x_right[ey, ex, eta] * dxdxi_right[ey, ex, eta] + xi_y_right[ey, ex, eta] * dydxi_right[ey, ex, eta] + xi_z_right[ey, ex, eta] * dzdxi_right[ey, ex, eta]
+                    alpha_v_left = xi_x_left[ey, ex, eta] * dxdeta_left[ey, ex, eta] + xi_y_left[ey, ex, eta] * dydeta_left[ey, ex, eta] + xi_z_left[ey, ex, eta] * dzdeta_left[ey, ex, eta]
+                    alpha_v_right = xi_x_right[ey, ex, eta] * dxdeta_right[ey, ex, eta] + xi_y_right[ey, ex, eta] * dydeta_right[ey, ex, eta] + xi_z_right[ey, ex, eta] * dzdeta_right[ey, ex, eta]
+                    h_hllc, delta_left, delta_right = _hllc_delta_scalar(
+                        h_left[ey, ex, eta], vel_left[ey, ex, eta], h_left_flux[ey, ex, eta],
+                        u_cov_left[ey, ex, eta], alpha_u_left,
+                        h_right[ey, ex, eta], vel_right[ey, ex, eta], h_right_flux[ey, ex, eta],
+                        u_cov_right[ey, ex, eta], alpha_u_right,
+                        g, froude_switch, h_flux_horz[ey, ex, eta],
+                    )
+                    h_flux_horz[ey, ex, eta] = h_hllc
+                    u_flux_horz_left[ey, ex, eta] += delta_left
+                    u_flux_horz_right[ey, ex, eta] += delta_right
+                    h_hllc, delta_left, delta_right = _hllc_delta_scalar(
+                        h_left[ey, ex, eta], vel_left[ey, ex, eta], h_left_flux[ey, ex, eta],
+                        v_cov_left[ey, ex, eta], alpha_v_left,
+                        h_right[ey, ex, eta], vel_right[ey, ex, eta], h_right_flux[ey, ex, eta],
+                        v_cov_right[ey, ex, eta], alpha_v_right,
+                        g, froude_switch, h_flux_horz[ey, ex, eta],
+                    )
+                    h_flux_horz[ey, ex, eta] = h_hllc
+                    v_flux_horz_left[ey, ex, eta] += delta_left
+                    v_flux_horz_right[ey, ex, eta] += delta_right
+
         for ey in range(ny):
             for ex in range(nx):
                 for xi in range(n):
@@ -579,17 +818,29 @@ if njit is not None:
                     h_k[ey, ex, n - 1, xi] -= (h_flux_vert[ey + 1, ex, xi] - h_down_flux[ey + 1, ex, xi]) * J_vertface[ey, ex, n - 1, xi] * edge_w / Jw[ey, ex, n - 1, xi]
                     h_k[ey, ex, 0, xi] -= -(h_flux_vert[ey, ex, xi] - h_up_flux[ey, ex, xi]) * J_vertface[ey, ex, 0, xi] * edge_w / Jw[ey, ex, 0, xi]
 
-                    avg_tan_cov = 0.5 * (u_cov_up[ey + 1, ex, xi] + u_cov_down[ey + 1, ex, xi]) - a_t * np.sign(c_adv_vert[ey + 1, ex, xi]) * (u_cov_up[ey + 1, ex, xi] - u_cov_down[ey + 1, ex, xi])
-                    tan_flux_delta = avg_tan_cov - u_cov_down[ey + 1, ex, xi]
-                    u_k[ey, ex, n - 1, xi] += -v_contra_down[ey + 1, ex, xi] * tan_flux_delta / wx
-                    v_k[ey, ex, n - 1, xi] += u_contra_down[ey + 1, ex, xi] * tan_flux_delta / wx
+                    u_k[ey, ex, n - 1, xi] -= (
+                        u_flux_vert_down[ey + 1, ex, xi]
+                        - v_contra_down[ey + 1, ex, xi] * u_cov_down[ey + 1, ex, xi]
+                    ) / wx
+                    v_k[ey, ex, n - 1, xi] -= (
+                        v_flux_vert_down[ey + 1, ex, xi]
+                        - (
+                            uv_down_flux[ey + 1, ex, xi]
+                            - u_contra_down[ey + 1, ex, xi] * u_cov_down[ey + 1, ex, xi]
+                        )
+                    ) / wx
 
-                    avg_tan_cov = 0.5 * (u_cov_up[ey, ex, xi] + u_cov_down[ey, ex, xi]) - a_t * np.sign(c_adv_vert[ey, ex, xi]) * (u_cov_up[ey, ex, xi] - u_cov_down[ey, ex, xi])
-                    tan_flux_delta = avg_tan_cov - u_cov_up[ey, ex, xi]
-                    u_k[ey, ex, 0, xi] += v_contra_up[ey, ex, xi] * tan_flux_delta / wx
-                    v_k[ey, ex, n - 1, xi] -= (uv_flux_vert[ey + 1, ex, xi] - uv_down_flux[ey + 1, ex, xi]) / wx
-                    v_k[ey, ex, 0, xi] -= -(uv_flux_vert[ey, ex, xi] - uv_up_flux[ey, ex, xi]) / wx
-                    v_k[ey, ex, 0, xi] += -u_contra_up[ey, ex, xi] * tan_flux_delta / wx
+                    u_k[ey, ex, 0, xi] += (
+                        u_flux_vert_up[ey, ex, xi]
+                        - v_contra_up[ey, ex, xi] * u_cov_up[ey, ex, xi]
+                    ) / wx
+                    v_k[ey, ex, 0, xi] += (
+                        v_flux_vert_up[ey, ex, xi]
+                        - (
+                            uv_up_flux[ey, ex, xi]
+                            - u_contra_up[ey, ex, xi] * u_cov_up[ey, ex, xi]
+                        )
+                    ) / wx
 
 
                 for eta in range(n):
@@ -598,18 +849,29 @@ if njit is not None:
                     h_k[ey, ex, eta, n - 1] -= (h_flux_horz[ey, ex + 1, eta] - h_left_flux[ey, ex + 1, eta]) * J_horzface[ey, ex, eta, n - 1] * edge_w / Jw[ey, ex, eta, n - 1]
                     h_k[ey, ex, eta, 0] -= -(h_flux_horz[ey, ex, eta] - h_right_flux[ey, ex, eta]) * J_horzface[ey, ex, eta, 0] * edge_w / Jw[ey, ex, eta, 0]
 
-                    u_k[ey, ex, eta, n - 1] -= (uv_flux_horz[ey, ex + 1, eta] - uv_left_flux[ey, ex + 1, eta]) / wx
-                    u_k[ey, ex, eta, 0] -= -(uv_flux_horz[ey, ex, eta] - uv_right_flux[ey, ex, eta]) / wx
+                    u_k[ey, ex, eta, n - 1] -= (
+                        u_flux_horz_left[ey, ex + 1, eta]
+                        - (
+                            uv_left_flux[ey, ex + 1, eta]
+                            - v_contra_left[ey, ex + 1, eta] * v_cov_left[ey, ex + 1, eta]
+                        )
+                    ) / wx
+                    v_k[ey, ex, eta, n - 1] -= (
+                        v_flux_horz_left[ey, ex + 1, eta]
+                        - u_contra_left[ey, ex + 1, eta] * v_cov_left[ey, ex + 1, eta]
+                    ) / wx
 
-                    avg_tan_cov = 0.5 * (v_cov_right[ey, ex + 1, eta] + v_cov_left[ey, ex + 1, eta]) - a_t * np.sign(c_adv_horz[ey, ex + 1, eta]) * (v_cov_right[ey, ex + 1, eta] - v_cov_left[ey, ex + 1, eta])
-                    tan_flux_delta = avg_tan_cov - v_cov_left[ey, ex + 1, eta]
-                    u_k[ey, ex, eta, n - 1] += v_contra_left[ey, ex + 1, eta] * tan_flux_delta / wx
-                    v_k[ey, ex, eta, n - 1] += -u_contra_left[ey, ex + 1, eta] * tan_flux_delta / wx
-
-                    avg_tan_cov = 0.5 * (v_cov_right[ey, ex, eta] + v_cov_left[ey, ex, eta]) - a_t * np.sign(c_adv_horz[ey, ex, eta]) * (v_cov_right[ey, ex, eta] - v_cov_left[ey, ex, eta])
-                    tan_flux_delta = avg_tan_cov - v_cov_right[ey, ex, eta]
-                    u_k[ey, ex, eta, 0] += -v_contra_right[ey, ex, eta] * tan_flux_delta / wx
-                    v_k[ey, ex, eta, 0] += u_contra_right[ey, ex, eta] * tan_flux_delta / wx
+                    u_k[ey, ex, eta, 0] += (
+                        u_flux_horz_right[ey, ex, eta]
+                        - (
+                            uv_right_flux[ey, ex, eta]
+                            - v_contra_right[ey, ex, eta] * v_cov_right[ey, ex, eta]
+                        )
+                    ) / wx
+                    v_k[ey, ex, eta, 0] += (
+                        v_flux_horz_right[ey, ex, eta]
+                        - u_contra_right[ey, ex, eta] * v_cov_right[ey, ex, eta]
+                    ) / wx
 
         for ey in range(ny):
             for ex in range(nx):
@@ -630,7 +892,7 @@ class DGCubedSphereSWENumpy:
     def __init__(
             self, poly_order, nx, ny, g, f, eps, radius=1.0, device='cpu',
             solution=None, a=0.0, ah=0.0, dtype=np.float64,
-            tangent_diss=False, nprocx=1, nprocy=1, comm=None, **kwargs):
+            tangent_diss=False, froude_switch=1.0, nprocx=1, nprocy=1, comm=None, **kwargs):
 
         self.face_names = ['zp', 'zn', 'xp', 'xn', 'yp', 'yn']
         self.nprocx = nprocx
@@ -678,7 +940,7 @@ class DGCubedSphereSWENumpy:
         self.faces = {
             name: DGCubedSphereFaceNumpy(
                 name, poly_order, face_nx, face_ny, g, f, radius, eps, device, a=a, ah=ah, dtype=dtype,
-                bc='', tangent_diss=tangent_diss,
+                bc='', tangent_diss=tangent_diss, froude_switch=froude_switch,
                 x_proc_idx=self.x_proc_idx if self.parallel else 0,
                 y_proc_idx=self.y_proc_idx if self.parallel else 0,
                 nprocx=self.nprocx if self.parallel else 1,
@@ -694,6 +956,7 @@ class DGCubedSphereSWENumpy:
         self.cdt = min(self.faces[n].cdt for n in self.active_face_names)
         self.flag = True
         self.tangent_diss = tangent_diss
+        self.froude_switch = np.inf if froude_switch is None else float(froude_switch)
 
         self.time_list = []
         self.energy_list = []
@@ -1699,7 +1962,7 @@ class DGCubedSphereFaceNumpy:
     def __init__(
             self, name, poly_order, nx, ny, g, f, radius, eps, device='cpu',
             solution=None, a=0.0, ah=0.0, dtype=np.float64, bc='wall',
-            tangent_diss=False, x_proc_idx=0, y_proc_idx=0, nprocx=1, nprocy=1,
+            tangent_diss=False, froude_switch=1.0, x_proc_idx=0, y_proc_idx=0, nprocx=1, nprocy=1,
             global_nx=None, global_ny=None, x_min=None, x_max=None, y_min=None, y_max=None,
             **kwargs
         ):
@@ -1718,6 +1981,7 @@ class DGCubedSphereFaceNumpy:
         self.eps = eps
         self.a = a
         self.ah = ah
+        self.froude_switch = np.inf if froude_switch is None else float(froude_switch)
         self.solution = solution
         self.dtype = dtype
         self.xperiodic = self.yperiodic = False
@@ -2629,7 +2893,7 @@ class DGCubedSphereFaceNumpy:
             self.dxdxi_right, self.dydxi_right, self.dzdxi_right, self.dxdxi_left, self.dydxi_left, self.dzdxi_left,
             self.dxdeta_up, self.dydeta_up, self.dzdeta_up, self.dxdeta_down, self.dydeta_down, self.dzdeta_down,
             self.dxdeta_right, self.dydeta_right, self.dzdeta_right, self.dxdeta_left, self.dydeta_left, self.dzdeta_left,
-            self.g, self.a, self.ah, self.tangent_diss,
+            self.g, self.a, self.ah, self.tangent_diss, self.froude_switch,
         )
 
     def solve_numpy(self, u, v, w, h, t, dt, *, verbose=False):
@@ -2687,8 +2951,72 @@ class DGCubedSphereFaceNumpy:
         c_adv_vert = 0.5 * (self.h_up * vel_up + self.h_down * vel_down) / h_ve #- self.g * self.ah * (self.h_up - self.h_down) / (c_snd_ve * h_ve)
         c_adv_horz = 0.5 * (self.h_right * vel_right + self.h_left * vel_left) / h_ho #- self.g * self.ah * (self.h_right - self.h_left) / (c_snd_ho * h_ho)
 
+        u_cov_up = self.u_up * self.dxdxi_up + self.v_up * self.dydxi_up + self.w_up * self.dzdxi_up
+        u_cov_down = self.u_down * self.dxdxi_down + self.v_down * self.dydxi_down + self.w_down * self.dzdxi_down
+        u_cov_right = self.u_right * self.dxdxi_right + self.v_right * self.dydxi_right + self.w_right * self.dzdxi_right
+        u_cov_left = self.u_left * self.dxdxi_left + self.v_left * self.dydxi_left + self.w_left * self.dzdxi_left
+
+        v_cov_up = self.u_up * self.dxdeta_up + self.v_up * self.dydeta_up + self.w_up * self.dzdeta_up
+        v_cov_down = self.u_down * self.dxdeta_down + self.v_down * self.dydeta_down + self.w_down * self.dzdeta_down
+        v_cov_right = self.u_right * self.dxdeta_right + self.v_right * self.dydeta_right + self.w_right * self.dzdeta_right
+        v_cov_left = self.u_left * self.dxdeta_left + self.v_left * self.dydeta_left + self.w_left * self.dzdeta_left
+
+        u_contra_up = self.u_up * self.dxidx_up + self.v_up * self.dxidy_up + self.w_up * self.dxidz_up
+        u_contra_down = self.u_down * self.dxidx_down + self.v_down * self.dxidy_down + self.w_down * self.dxidz_down
+        u_contra_right = self.u_right * self.dxidx_right + self.v_right * self.dxidy_right + self.w_right * self.dxidz_right
+        u_contra_left = self.u_left * self.dxidx_left + self.v_left * self.dxidy_left + self.w_left * self.dxidz_left
+
+        v_contra_up = self.u_up * self.detadx_up + self.v_up * self.detady_up + self.w_up * self.detadz_up
+        v_contra_down = self.u_down * self.detadx_down + self.v_down * self.detady_down + self.w_down * self.detadz_down
+        v_contra_right = self.u_right * self.detadx_right + self.v_right * self.detady_right + self.w_right * self.detadz_right
+        v_contra_left = self.u_left * self.detadx_left + self.v_left * self.detady_left + self.w_left * self.detadz_left
+
         h_flux_vert = c_adv_vert * h_ve - self.ah * abs(c_adv_vert) * (self.h_up - self.h_down)
         h_flux_horz = c_adv_horz * h_ho - self.ah * abs(c_adv_horz) * (self.h_right - self.h_left)
+
+        uv_flux_horz = 0.5 * (uv_right_flux + uv_left_flux) - self.a * (c_snd_ho + abs(c_adv_horz)) * (h_right_flux - h_left_flux) / h_ho
+        uv_flux_vert = 0.5 * (uv_up_flux + uv_down_flux) - self.a * (c_snd_ve + abs(c_adv_vert)) * (h_up_flux - h_down_flux) / h_ve
+
+        if self.tangent_diss:
+            u_cov_vert_avg = (c_adv_vert < 0) * u_cov_up + (c_adv_vert >= 0) * u_cov_down
+            v_cov_horz_avg = (c_adv_horz < 0) * v_cov_right + (c_adv_horz >= 0) * v_cov_left
+        else:
+            u_cov_vert_avg = 0.5 * (u_cov_up + u_cov_down)
+            v_cov_horz_avg = 0.5 * (v_cov_right + v_cov_left)
+
+        u_flux_vert_up = v_contra_up * u_cov_vert_avg
+        u_flux_vert_down = v_contra_down * u_cov_vert_avg
+        v_flux_vert_up = uv_flux_vert - u_contra_up * u_cov_vert_avg
+        v_flux_vert_down = uv_flux_vert - u_contra_down * u_cov_vert_avg
+
+        u_flux_horz_right = uv_flux_horz - v_contra_right * v_cov_horz_avg
+        u_flux_horz_left = uv_flux_horz - v_contra_left * v_cov_horz_avg
+        v_flux_horz_right = u_contra_right * v_cov_horz_avg
+        v_flux_horz_left = u_contra_left * v_cov_horz_avg
+
+        alpha_u_up = self.eta_x_up * self.dxdxi_up + self.eta_y_up * self.dydxi_up + self.eta_z_up * self.dzdxi_up
+        alpha_u_down = self.eta_x_down * self.dxdxi_down + self.eta_y_down * self.dydxi_down + self.eta_z_down * self.dzdxi_down
+        alpha_v_up = self.eta_x_up * self.dxdeta_up + self.eta_y_up * self.dydeta_up + self.eta_z_up * self.dzdeta_up
+        alpha_v_down = self.eta_x_down * self.dxdeta_down + self.eta_y_down * self.dydeta_down + self.eta_z_down * self.dzdeta_down
+        h_flux_vert, u_flux_vert_down, u_flux_vert_up, v_flux_vert_down, v_flux_vert_up = _hllc_fluxes_where_froude(
+            self.h_down, vel_down, h_down_flux,
+            u_cov_down, v_cov_down, u_flux_vert_down, v_flux_vert_down, alpha_u_down, alpha_v_down,
+            self.h_up, vel_up, h_up_flux,
+            u_cov_up, v_cov_up, u_flux_vert_up, v_flux_vert_up, alpha_u_up, alpha_v_up,
+            self.g, self.froude_switch, h_flux_vert,
+        )
+
+        alpha_u_left = self.xi_x_left * self.dxdxi_left + self.xi_y_left * self.dydxi_left + self.xi_z_left * self.dzdxi_left
+        alpha_u_right = self.xi_x_right * self.dxdxi_right + self.xi_y_right * self.dydxi_right + self.xi_z_right * self.dzdxi_right
+        alpha_v_left = self.xi_x_left * self.dxdeta_left + self.xi_y_left * self.dydeta_left + self.xi_z_left * self.dzdeta_left
+        alpha_v_right = self.xi_x_right * self.dxdeta_right + self.xi_y_right * self.dydeta_right + self.xi_z_right * self.dzdeta_right
+        h_flux_horz, u_flux_horz_left, u_flux_horz_right, v_flux_horz_left, v_flux_horz_right = _hllc_fluxes_where_froude(
+            self.h_left, vel_left, h_left_flux,
+            u_cov_left, v_cov_left, u_flux_horz_left, v_flux_horz_left, alpha_u_left, alpha_v_left,
+            self.h_right, vel_right, h_right_flux,
+            u_cov_right, v_cov_right, u_flux_horz_right, v_flux_horz_right, alpha_u_right, alpha_v_right,
+            self.g, self.froude_switch, h_flux_horz,
+        )
 
         # h_flux_vert = 0.5 * (h_up_flux + h_down_flux) - self.a * c_snd_ve * (uv_up_flux - uv_down_flux) / self.g
         # h_flux_horz = 0.5 * (h_right_flux + h_left_flux) - self.a * c_snd_ho * (uv_right_flux - uv_left_flux) / self.g
@@ -2712,9 +3040,6 @@ class DGCubedSphereFaceNumpy:
         # uv_flux_horz = 0.5 * (uv_right_flux + uv_left_flux) - self.a * (h_right_flux - h_left_flux) * alpha #(self.g / c_ho)
         # alpha = np.maximum(c_ve / self.h_up, c_ve / self.h_down)
         # uv_flux_vert = 0.5 * (uv_up_flux + uv_down_flux) - self.a * (h_up_flux - h_down_flux) * alpha #(self.g / c_ve) * (h_up_flux - h_down_flux)
-
-        uv_flux_horz = 0.5 * (uv_right_flux + uv_left_flux) - self.a * (c_snd_ho + abs(c_adv_horz)) * (h_right_flux - h_left_flux) / h_ho
-        uv_flux_vert = 0.5 * (uv_up_flux + uv_down_flux) - self.a * (c_snd_ve + abs(c_adv_vert)) * (h_up_flux - h_down_flux) / h_ve
 
         if self.b is not None:
             uv_flux += self.g * self.b
@@ -2756,20 +3081,14 @@ class DGCubedSphereFaceNumpy:
 
         wx = self.weights_x.ravel()[-1]
 
-        u_k[:, :, :, -1] -= (uv_flux_horz - uv_left_flux)[:, 1:] / wx
-        u_k[:, :, :, 0] -= -(uv_flux_horz - uv_right_flux)[:, :-1] / wx
-
-        if self.tangent_diss:
-            u_cov_vert_avg = (c_adv_vert < 0) * u_cov_up + (c_adv_vert >= 0) * u_cov_down
-            v_cov_horz_avg = (c_adv_horz < 0) * v_cov_right + (c_adv_horz >= 0) * v_cov_left
-        else:
-            u_cov_vert_avg = 0.5 * (u_cov_up + u_cov_down)
-            v_cov_horz_avg = 0.5 * (v_cov_right + v_cov_left)
-
-        u_k[:, :, -1] += -v_contra_down[1:] * (u_cov_vert_avg - u_cov_down)[1:] / wx
-        u_k[:, :, 0] += v_contra_up[:-1] * (u_cov_vert_avg - u_cov_up)[:-1] / wx
-        u_k[:, :, :, -1] += v_contra_left[:, 1:] * (v_cov_horz_avg - v_cov_left)[:, 1:] / wx
-        u_k[:, :, :, 0] += -v_contra_right[:, :-1] * (v_cov_horz_avg - v_cov_right)[:, :-1] / wx
+        u_k[:, :, -1] -= (u_flux_vert_down[1:] - (v_contra_down * u_cov_down)[1:]) / wx
+        u_k[:, :, 0] += (u_flux_vert_up[:-1] - (v_contra_up * u_cov_up)[:-1]) / wx
+        u_k[:, :, :, -1] -= (
+            u_flux_horz_left[:, 1:] - (uv_left_flux - v_contra_left * v_cov_left)[:, 1:]
+        ) / wx
+        u_k[:, :, :, 0] += (
+            u_flux_horz_right[:, :-1] - (uv_right_flux - v_contra_right * v_cov_right)[:, :-1]
+        ) / wx
 
         # handle v
         #######
@@ -2778,13 +3097,18 @@ class DGCubedSphereFaceNumpy:
         v_k = -self.ddeta(uv_flux)
         v_k += -u_contra * abs_vort_cov
 
-        v_k[:, :, -1] -= (uv_flux_vert - uv_down_flux)[1:] / wx
-        v_k[:, :, 0] -= -(uv_flux_vert - uv_up_flux)[:-1] / wx
-
-        v_k[:, :, -1] += u_contra_down[1:] * (u_cov_vert_avg - u_cov_down)[1:] / wx
-        v_k[:, :, 0] += -u_contra_up[:-1] * (u_cov_vert_avg - u_cov_up)[:-1] / wx
-        v_k[:, :, :, -1] += -u_contra_left[:, 1:] * (v_cov_horz_avg - v_cov_left)[:, 1:] / wx
-        v_k[:, :, :, 0] += u_contra_right[:, :-1] * (v_cov_horz_avg - v_cov_right)[:, :-1] / wx
+        v_k[:, :, -1] -= (
+            v_flux_vert_down[1:] - (uv_down_flux - u_contra_down * u_cov_down)[1:]
+        ) / wx
+        v_k[:, :, 0] += (
+            v_flux_vert_up[:-1] - (uv_up_flux - u_contra_up * u_cov_up)[:-1]
+        ) / wx
+        v_k[:, :, :, -1] -= (
+            v_flux_horz_left[:, 1:] - (u_contra_left * v_cov_left)[:, 1:]
+        ) / wx
+        v_k[:, :, :, 0] += (
+            v_flux_horz_right[:, :-1] - (u_contra_right * v_cov_right)[:, :-1]
+        ) / wx
 
         u_k, v_k, w_k = self.cov_to_phys(u_k, v_k, 0)
 
