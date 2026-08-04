@@ -270,7 +270,7 @@ if mode == 'restart':
         while solver.time < tend:
             solver.time_step(dt=min(dt, tend - solver.time), order=34)
 
-        if ((i + 1) % 1 == 0):
+        if ((i + 1) % n_save == 0):
             fn_template = get_fn_template(i + 1)
             if rank == 0:
                 print('Saving:', fn_template)
