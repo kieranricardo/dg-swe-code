@@ -114,8 +114,10 @@ def get_fn_template(a, tangent_diss, h_diss, old_tangent_diss=False, day=None):
 
 
 parameters_list = [
-    dict(a=0.5, tangent_diss=True, h_diss=False),
+    dict(a=0.5, tangent_diss=True, h_diss=False, old_tangent_diss=False),
     dict(a=0.5, tangent_diss=True, h_diss=False, old_tangent_diss=True),
+    dict(a=0.5, tangent_diss=True, h_diss=True, old_tangent_diss=False),
+    dict(a=0.5, tangent_diss=True, h_diss=True, old_tangent_diss=True),
 ]
 
 if mode == 'run':

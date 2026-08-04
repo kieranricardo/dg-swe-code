@@ -19,7 +19,7 @@ s_0 = 3000
 poly_order = 3
 a = 0.5
 
-old_tangent_diss = False
+old_tangent_diss = True
 tangent_diss = True
 h_diss = False
 
@@ -79,7 +79,7 @@ def get_galewsky_fn_template(day=None):
 # fn_template = f"{exp_name}_day_{day}.npy"
 # out_name = 'galewsky'
 get_fn_template = get_galewsky_fn_template
-fn_template = get_fn_template(16)
+fn_template = get_fn_template(20)
 
 # get_fn_template = get_rw_fn_template
 # fn_template = get_fn_template(1080)

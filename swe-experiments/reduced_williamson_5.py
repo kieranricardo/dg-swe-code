@@ -22,6 +22,7 @@ else:
 cfl = 1.3
 tangent_diss = True
 h_diss = True
+old_tangent_diss = True
 
 if h_diss:
     ah = 0.5
@@ -68,7 +69,9 @@ dt = cfl * 0.5 * dx_min / wave_speed
 
 def get_fn_template(day=None):
     suffix = ''
-    if tangent_diss:
+    if old_tangent_diss and tangent_diss:
+        suffix = suffix + 'old_tangent_diss'
+    elif tangent_diss:
         suffix = suffix + 'tangent_diss'
 
     if h_diss:
