@@ -28,7 +28,15 @@ def _as_numpy(arr):
     return np.asarray(arr)
 
 
-def _make_solvers(poly_order, grid, tangent_diss, ah=0.25, a=0.5):
+def _make_solvers(
+    poly_order,
+    grid,
+    tangent_diss,
+    ah=0.25,
+    a=0.5,
+    old_tangent_diss=False,
+    lmars=False,
+):
     kwargs = dict(
         poly_order=poly_order,
         nx=grid,
@@ -42,7 +50,9 @@ def _make_solvers(poly_order, grid, tangent_diss, ah=0.25, a=0.5):
         dtype=np.float64,
         tangent_diss=tangent_diss,
     )
-    return DGCubedSphereSWE(**kwargs), DGCubedSphereSWENumpy(**kwargs)
+    return DGCubedSphereSWE(**kwargs), DGCubedSphereSWENumpy(
+        **kwargs, old_tangent_diss=old_tangent_diss, lmars=lmars
+    )
 
 
 def _set_random_state(torch_solver, numpy_solver, seed):
@@ -170,6 +180,66 @@ def test_numpy_and_numba_residuals_match_for_supercritical_faces():
         )
         for name in FACE_NAMES
     }
+    numpy_out = _residual_pass(numpy_solver, numpy_state, "solve_numpy")
+    numba_out = _residual_pass(numpy_solver, numpy_state, "solve")
+
+    _assert_outputs_close("numpy", numpy_out, "numba", numba_out)
+
+
+@pytest.mark.parametrize(
+    ("poly_order", "grid"),
+    [(1, 4), (3, 4)],
+)
+@pytest.mark.parametrize("ah", [0.0, 0.5])
+def test_numpy_and_numba_residuals_match_with_old_tangent_diss(poly_order, grid, ah):
+    torch_solver, numpy_solver = _make_solvers(
+        poly_order,
+        grid,
+        tangent_diss=True,
+        ah=ah,
+        a=ah,
+        old_tangent_diss=True,
+    )
+    torch_state, numpy_state = _set_random_state(
+        torch_solver, numpy_solver, seed=3100 + 100 * poly_order + grid
+    )
+
+    torch_out = _residual_pass(torch_solver, torch_state, "solve")
+    numpy_out = _residual_pass(numpy_solver, numpy_state, "solve_numpy")
+    numba_out = _residual_pass(numpy_solver, numpy_state, "solve")
+
+    if ah == 0.0:
+        _assert_outputs_close("torch", torch_out, "numpy", numpy_out)
+        _assert_outputs_close("torch", torch_out, "numba", numba_out)
+    _assert_outputs_close("numpy", numpy_out, "numba", numba_out)
+
+
+@pytest.mark.parametrize(
+    ("poly_order", "grid"),
+    [(1, 4), (3, 4)],
+)
+@pytest.mark.parametrize(
+    ("ah", "tangent_diss"),
+    [
+        (0.0, False),
+        (0.0, True),
+        (0.5, False),
+        (0.5, True),
+    ],
+)
+def test_numpy_and_numba_residuals_match_with_lmars(poly_order, grid, ah, tangent_diss):
+    torch_solver, numpy_solver = _make_solvers(
+        poly_order,
+        grid,
+        tangent_diss=tangent_diss,
+        ah=ah,
+        a=ah,
+        lmars=True,
+    )
+    _, numpy_state = _set_random_state(
+        torch_solver, numpy_solver, seed=4100 + 100 * poly_order + grid
+    )
+
     numpy_out = _residual_pass(numpy_solver, numpy_state, "solve_numpy")
     numba_out = _residual_pass(numpy_solver, numpy_state, "solve")
 
