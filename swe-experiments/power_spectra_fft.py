@@ -22,6 +22,7 @@ a = 0.5
 old_tangent_diss = True
 tangent_diss = True
 h_diss = False
+lmars = True
 
 if h_diss:
     ah = 0.5
@@ -56,16 +57,20 @@ def get_rw_fn_template(day=None):
 
 def get_galewsky_fn_template(day=None):
     suffix = ''
+    
+    if lmars:
+        suffix = suffix + f'lmars'
 
-    suffix = suffix + f'a_{a}'
+    else:
+        suffix = suffix + f'a_{a}'
 
-    if old_tangent_diss and tangent_diss:
-        suffix = suffix + '_old_tangent_diss'
-    elif tangent_diss:
-        suffix = suffix + '_tangent_diss'
+        if old_tangent_diss and tangent_diss:
+            suffix = suffix + '_old_tangent_diss'
+        elif tangent_diss:
+            suffix = suffix + '_tangent_diss'
 
-    if h_diss:
-        suffix = suffix + '_h_diss'
+        if h_diss:
+            suffix = suffix + '_h_diss'
 
     if day is not None:
         suffix = suffix + f'_day_{day}'

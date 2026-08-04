@@ -23,6 +23,7 @@ cfl = 1.3
 tangent_diss = True
 h_diss = True
 old_tangent_diss = True
+lmars = False
 
 if h_diss:
     ah = 0.5
@@ -69,18 +70,22 @@ dt = cfl * 0.5 * dx_min / wave_speed
 
 def get_fn_template(day=None):
     suffix = ''
-    if old_tangent_diss and tangent_diss:
-        suffix = suffix + 'old_tangent_diss'
-    elif tangent_diss:
-        suffix = suffix + 'tangent_diss'
 
-    if h_diss:
-        suffix = suffix + '_h_diss'
+    if lmars:
+            suffix = suffix + f'lmars'
+    else:
+        if old_tangent_diss and tangent_diss:
+            suffix = suffix + 'old_tangent_diss'
+        elif tangent_diss:
+            suffix = suffix + 'tangent_diss'
 
-    if s_0 == 4000:
-        suffix = suffix + '_big_mountain'
-    elif s_0 != 3000:
-        raise ValueError(f'suffix: expedcted one of 3000, 4000. Found {s_0}.')
+        if h_diss:
+            suffix = suffix + '_h_diss'
+
+        if s_0 == 4000:
+            suffix = suffix + '_big_mountain'
+        elif s_0 != 3000:
+            raise ValueError(f'suffix: expedcted one of 3000, 4000. Found {s_0}.')
 
     if day is None:
         return f"reduced_williamson_5_day_nx{nx-1}_p{poly_order}_{suffix}"
@@ -157,7 +162,7 @@ solver = DGCubedSphereSWENumpy(
     poly_order, nx, ny, g, f,
     eps=0.0, a=0.5, ah=ah, radius=radius,
     dtype=np.float64, tangent_diss=tangent_diss,
-    nprocx=nprocx, nprocy=nprocy
+    nprocx=nprocx, nprocy=nprocy, lmars=lmars
 )
 
 for face in solver.faces.values():
