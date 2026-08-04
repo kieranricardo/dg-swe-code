@@ -19,8 +19,9 @@ s_0 = 3000
 poly_order = 3
 a = 0.5
 
+old_tangent_diss = False
 tangent_diss = True
-h_diss = True
+h_diss = False
 
 if h_diss:
     ah = 0.5
@@ -57,8 +58,10 @@ def get_galewsky_fn_template(day=None):
     suffix = ''
 
     suffix = suffix + f'a_{a}'
-    
-    if tangent_diss:
+
+    if old_tangent_diss and tangent_diss:
+        suffix = suffix + '_old_tangent_diss'
+    elif tangent_diss:
         suffix = suffix + '_tangent_diss'
 
     if h_diss:
@@ -297,7 +300,7 @@ def add_reference_line(ax, spectrum, idx, exponent, label):
     if len(spectrum) > idx:
         ks = np.arange(idx, len(spectrum))
         line = ks ** exponent
-        line *= spectrum[idx] / line[0]
+        line *= 1.2 * spectrum[idx] / line[0]
         ax.loglog(ks, line, linestyle='dotted', label=label)
 
 
@@ -306,12 +309,12 @@ def plot_spectra(ke_spectrum, enstrophy_spectrum, fn_template):
 
     axes[0].semilogy(ke_spectrum)
     # add_reference_line(axes[0], ke_spectrum, 30, -5/3, r'$n^{-5/3}$')
-    add_reference_line(axes[0], ke_spectrum, 75, -3.0, r'$n^{-3}$')
+    add_reference_line(axes[0], ke_spectrum, 60, -3.0, r'$n^{-3}$')
     axes[0].set_title('Kinetic energy')
     axes[0].set_ylabel('Power')
 
     axes[1].semilogy(enstrophy_spectrum)
-    add_reference_line(axes[1], enstrophy_spectrum, 100, -1.0, r'$n^{-1}$')
+    add_reference_line(axes[1], enstrophy_spectrum, 60, -1.0, r'$n^{-1}$')
     axes[1].set_title('Enstrophy')
     axes[1].set_ylabel('Power')
 

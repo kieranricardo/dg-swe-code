@@ -27,7 +27,6 @@ parser = argparse.ArgumentParser()
 parser.add_argument('--order', type=int, help='Polynomial order')
 parser.add_argument('--nx', type=int, help='Number of cells in horizontal')
 parser.add_argument('--plot', action='store_true')
-parser.add_argument('--restart', action='store_true')
 parser.add_argument('--day', type=int, help='Polynomial order')
 args = parser.parse_args()
 
@@ -95,12 +94,14 @@ def initial_condition(face):
     return u, v, w, h
 
 
-def get_fn_template(a, tangent_diss, h_diss, day=None):
+def get_fn_template(a, tangent_diss, h_diss, old_tangent_diss=False, day=None):
     suffix = ''
 
     suffix = suffix + f'a_{a}'
-    
-    if tangent_diss:
+
+    if old_tangent_diss and tangent_diss:
+        suffix = suffix + '_old_tangent_diss'
+    elif tangent_diss:
         suffix = suffix + '_tangent_diss'
 
     if h_diss:
@@ -113,8 +114,8 @@ def get_fn_template(a, tangent_diss, h_diss, day=None):
 
 
 parameters_list = [
-    # dict(a=0.5, tangent_diss=True, h_diss=False),
-    dict(a=0.5, tangent_diss=True, h_diss=True),
+    dict(a=0.5, tangent_diss=True, h_diss=False),
+    dict(a=0.5, tangent_diss=True, h_diss=False, old_tangent_diss=True),
 ]
 
 if mode == 'run':
@@ -124,6 +125,7 @@ if mode == 'run':
         a = parameters['a']
         tangent_diss = parameters['tangent_diss']
         h_diss = parameters['h_diss']
+        old_tangent_diss = parameters['old_tangent_diss']
 
         if parameters['h_diss']:
             ah = 0.5
@@ -142,7 +144,7 @@ if mode == 'run':
             poly_order, nx, ny, g, f,
             eps, a=a, radius=radius,
             dtype=np.float64, tangent_diss=tangent_diss, ah=ah, 
-            nprocx=nprocx, nprocy=nprocy
+            nprocx=nprocx, nprocy=nprocy, old_tangent_diss=old_tangent_diss
         )
 
         for face in solver.faces.values():
