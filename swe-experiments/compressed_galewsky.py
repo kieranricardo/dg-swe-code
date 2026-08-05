@@ -48,11 +48,17 @@ radius = 6.37122e6
 u_0 = 80
 h_0 = 10_000
 
+shift = (20 / 180) * np.pi
+diff = (2 / 14) * np.pi
+lat_0 = shift + np.pi / 7
+lat_1 = lat_0 + diff
+lat_2 = 0.5 * (lat_0 + lat_1)
+
+
 def initial_condition(face):
 
     def zonal_flow(lat):
-        lat_0 = np.pi / 7
-        lat_1 = 0.5 * np.pi - lat_0
+        
 
         e_n = np.exp(-4 / (lat_1 - lat_0) ** 2)
 
@@ -81,7 +87,6 @@ def initial_condition(face):
 
     alpha = 1 / 3
     beta = 1 / 15
-    lat_2 = np.pi / 4
     h_pert = 120 * np.cos(lat) * np.exp(-(long / alpha) ** 2) * np.exp(-((lat_2 - lat) / beta) ** 2)
     h += h_pert
 
@@ -115,7 +120,7 @@ def get_fn_template(a, flux_type, h_diss, day=None):
     if day is not None:
         suffix = suffix + f'_day_{day}'
 
-    return f"galewsky_nx{nx-1}_p{poly_order}_{suffix}"
+    return f"compressed_galewsky_nx{nx-1}_p{poly_order}_{suffix}"
 
 
 parameters_list = [
@@ -153,6 +158,12 @@ if mode == 'run':
         for face in solver.faces.values():
             face.set_initial_condition(*initial_condition(face))
         solver.boundaries()
+
+        # face = solver.faces['zp']
+        # vel = np.sqrt(face.u.ravel()**2 + face.v.ravel()**2 + face.w.ravel()**2)
+        # plt.tricontourf(face.xs.ravel(), face.ys.ravel(), vel)
+        # plt.show()
+        # exit(0)
 
         dt = 130 * (15 / nx) * (eps / 0.8)
 
@@ -206,7 +217,8 @@ elif mode == 'plot':
         def _plot_func_helper(data, name, title, cmap, vmin=None, vmax=None):
             plt.figure(figsize=(10, 5), dpi=400)
             plt.title(title)
-            plt.pcolormesh(lon.ravel(), lat.ravel(), data, cmap=cmap, vmin=vmin, vmax=vmax)
+            # plt.pcolormesh(solver.faces['zp'].xs.ravel(), solver.faces['zp'].ys.ravel(), data.ravel(), cmap=cmap, vmin=vmin, vmax=vmax)
+            plt.tricontourf(solver.faces['zp'].xs.ravel(), solver.faces['zp'].ys.ravel(), data.ravel(), cmap=cmap, vmin=vmin, vmax=vmax, levels=100)
             plt.xlabel('Longitude')
             plt.ylabel('Latitude')
             plt.colorbar()
@@ -219,32 +231,10 @@ elif mode == 'plot':
             quadrature_order=10,
             scale=0.75,
         )
-        vort_plot_siac = solver.evaluate_latlong(lat, lon, rel_vort_siac, degrees=True)
-        vort_plot = solver.evaluate_latlong(lat, lon, solver.vorticity(), degrees=True)
-        vort_plot -= 2 * 7.292e-5 * np.sin(lat * np.pi / 180)
-        h_plot = solver.evaluate_latlong(lat, lon, dict((name, face.h) for name, face in solver.faces.items()), degrees=True)
+        vort_plot = solver.vorticity()['zp']
+        vort_plot -= solver.faces['zp'].f
+        h_plot = solver.faces['zp'].h
 
-        _plot_func_helper(vort_plot_siac, 'siac_vort', 'Relative vorticity (SIAC)', cmocean.cm.curl, vmin=None, vmax=None)
         _plot_func_helper(vort_plot, 'vort', 'Relative vorticity', cmocean.cm.curl, vmin=None, vmax=None)
         
         _plot_func_helper(h_plot, 'h', 'Height', cmocean.cm.deep)
-
-        u_plot = solver.evaluate_latlong(lat, lon, dict((name, face.u) for name, face in solver.faces.items()), degrees=True)
-        v_plot = solver.evaluate_latlong(lat, lon, dict((name, face.v) for name, face in solver.faces.items()), degrees=True)
-        w_plot = solver.evaluate_latlong(lat, lon, dict((name, face.w) for name, face in solver.faces.items()), degrees=True)
-
-        long_vec_x = np.cos(lon * np.pi / 180)
-        long_vec_y = np.sin(lon * np.pi / 180)
-        long_vec_z = 0 * lon
-
-        lat_vec_x = -np.sin(lat * np.pi / 180) * np.sin(lon * np.pi / 180)
-        lat_vec_y = np.sin(lat * np.pi / 180) * np.cos(lon * np.pi / 180)
-        lat_vec_z = np.cos(lat * np.pi / 180)
-
-        zonal_vel = long_vec_x * u_plot + long_vec_y * v_plot + long_vec_z * w_plot
-        meridional_vel = lat_vec_x * u_plot + lat_vec_y * v_plot + lat_vec_z * w_plot
-        speed = np.sqrt(zonal_vel**2 + meridional_vel**2)
-
-        _plot_func_helper(zonal_vel, 'zonal_vel', 'Zonal velocity', cmocean.cm.delta)
-        _plot_func_helper(meridional_vel, 'meridional_vel', 'Meridional velocity', cmocean.cm.delta)
-        _plot_func_helper(speed, 'speed', 'Speed', cmocean.cm.speed)
