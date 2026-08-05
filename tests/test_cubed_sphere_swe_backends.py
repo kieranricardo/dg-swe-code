@@ -31,13 +31,14 @@ def _as_numpy(arr):
 def _make_solvers(
     poly_order,
     grid,
-    tangent_diss,
+    tangent_diss=False,
     ah=0.25,
     a=0.5,
-    old_tangent_diss=False,
-    lmars=False,
+    flux_type=None,
 ):
-    kwargs = dict(
+    if flux_type is None:
+        flux_type = "standard_tangent" if tangent_diss else "standard"
+    common_kwargs = dict(
         poly_order=poly_order,
         nx=grid,
         ny=grid,
@@ -48,10 +49,13 @@ def _make_solvers(
         a=a,
         ah=ah,
         dtype=np.float64,
+    )
+    torch_kwargs = dict(
+        common_kwargs,
         tangent_diss=tangent_diss,
     )
-    return DGCubedSphereSWE(**kwargs), DGCubedSphereSWENumpy(
-        **kwargs, old_tangent_diss=old_tangent_diss, lmars=lmars
+    return DGCubedSphereSWE(**torch_kwargs), DGCubedSphereSWENumpy(
+        **common_kwargs, flux_type=flux_type
     )
 
 
@@ -198,7 +202,7 @@ def test_numpy_and_numba_residuals_match_with_old_tangent_diss(poly_order, grid,
         tangent_diss=True,
         ah=ah,
         a=ah,
-        old_tangent_diss=True,
+        flux_type="old_tangent",
     )
     torch_state, numpy_state = _set_random_state(
         torch_solver, numpy_solver, seed=3100 + 100 * poly_order + grid
@@ -219,22 +223,16 @@ def test_numpy_and_numba_residuals_match_with_old_tangent_diss(poly_order, grid,
     [(1, 4), (3, 4)],
 )
 @pytest.mark.parametrize(
-    ("ah", "tangent_diss"),
-    [
-        (0.0, False),
-        (0.0, True),
-        (0.5, False),
-        (0.5, True),
-    ],
+    "ah",
+    [0.0, 0.5],
 )
-def test_numpy_and_numba_residuals_match_with_lmars(poly_order, grid, ah, tangent_diss):
+def test_numpy_and_numba_residuals_match_with_lmars(poly_order, grid, ah):
     torch_solver, numpy_solver = _make_solvers(
         poly_order,
         grid,
-        tangent_diss=tangent_diss,
         ah=ah,
         a=ah,
-        lmars=True,
+        flux_type="lmars",
     )
     _, numpy_state = _set_random_state(
         torch_solver, numpy_solver, seed=4100 + 100 * poly_order + grid
@@ -244,6 +242,54 @@ def test_numpy_and_numba_residuals_match_with_lmars(poly_order, grid, ah, tangen
     numba_out = _residual_pass(numpy_solver, numpy_state, "solve")
 
     _assert_outputs_close("numpy", numpy_out, "numba", numba_out)
+
+
+@pytest.mark.parametrize(
+    ("poly_order", "grid"),
+    [(1, 4), (3, 4)],
+)
+def test_numpy_and_numba_residuals_match_with_barth_diss(poly_order, grid):
+    torch_solver, numpy_solver = _make_solvers(
+        poly_order,
+        grid,
+        ah=0.5,
+        a=0.5,
+        flux_type="barth",
+    )
+    _, numpy_state = _set_random_state(
+        torch_solver, numpy_solver, seed=5100 + 100 * poly_order + grid
+    )
+
+    numpy_out = _residual_pass(numpy_solver, numpy_state, "solve_numpy")
+    numba_out = _residual_pass(numpy_solver, numpy_state, "solve")
+
+    _assert_outputs_close("numpy", numpy_out, "numba", numba_out)
+
+
+def test_numpy_solver_rejects_invalid_flux_type():
+    with pytest.raises(ValueError, match="flux_type"):
+        DGCubedSphereSWENumpy(
+            poly_order=1,
+            nx=3,
+            ny=3,
+            g=9.81,
+            f=7.2921e-5,
+            eps=0.0,
+            flux_type="not-a-flux",
+        )
+
+
+def test_numpy_solver_rejects_legacy_flux_switches():
+    with pytest.raises(TypeError, match="Legacy flux switch"):
+        DGCubedSphereSWENumpy(
+            poly_order=1,
+            nx=3,
+            ny=3,
+            g=9.81,
+            f=7.2921e-5,
+            eps=0.0,
+            lmars=True,
+        )
 
 
 def _time_average(fn, repeats):

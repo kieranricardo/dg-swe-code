@@ -26,6 +26,31 @@ def _norm_l2(vec):
     return np.sqrt(sum(a * a for a in vec))
 
 
+VALID_FLUX_TYPES = (
+    "standard",
+    "standard_tangent",
+    "old_tangent",
+    "lmars",
+    "barth",
+)
+
+
+def _validate_flux_type(flux_type):
+    if flux_type not in VALID_FLUX_TYPES:
+        raise ValueError(
+            f"flux_type: expected one of {VALID_FLUX_TYPES}. Found {flux_type!r}."
+        )
+    return flux_type
+
+
+def _reject_legacy_flux_kwargs(kwargs):
+    legacy_keys = ("tangent_diss", "old_tangent_diss", "lmars", "barth_diss")
+    found = [key for key in legacy_keys if key in kwargs]
+    if found:
+        keys = ", ".join(found)
+        raise TypeError(f"Legacy flux switch keyword(s) removed: {keys}. Use flux_type instead.")
+
+
 def _positive_part_power(x, degree):
     x = np.asarray(x, dtype=float)
     out = np.zeros_like(x, dtype=float)
@@ -1234,6 +1259,204 @@ if njit is not None:
                         )
 
     @njit(cache=True, fastmath=True, boundscheck=False, nogil=True, error_model="numpy")
+    def _apply_barth_diss_numba(
+        u_k, v_k, w_k, h_k, g,
+        vert_upper_edge_factor, vert_lower_edge_factor,
+        horz_right_edge_factor, horz_left_edge_factor,
+        u_up, v_up, w_up, h_up, u_down, v_down, w_down, h_down,
+        u_right, v_right, w_right, h_right, u_left, v_left, w_left, h_left,
+        eta_x_up, eta_y_up, eta_z_up, eta_x_down, eta_y_down, eta_z_down,
+        xi_x_right, xi_y_right, xi_z_right, xi_x_left, xi_y_left, xi_z_left,
+        dxdxi_up, dydxi_up, dzdxi_up, dxdxi_down, dydxi_down, dzdxi_down,
+        dxdxi_right, dydxi_right, dzdxi_right, dxdxi_left, dydxi_left, dzdxi_left,
+        dxdeta_up, dydeta_up, dzdeta_up, dxdeta_down, dydeta_down, dzdeta_down,
+        dxdeta_right, dydeta_right, dzdeta_right, dxdeta_left, dydeta_left, dzdeta_left,
+    ):
+        ny, nx, n, _ = u_k.shape
+
+        for ey in range(ny + 1):
+            for ex in range(nx):
+                for xi in range(n):
+                    uu_l = u_down[ey, ex, xi]
+                    vv_l = v_down[ey, ex, xi]
+                    ww_l = w_down[ey, ex, xi]
+                    hh_l = h_down[ey, ex, xi]
+                    uu_r = u_up[ey, ex, xi]
+                    vv_r = v_up[ey, ex, xi]
+                    ww_r = w_up[ey, ex, xi]
+                    hh_r = h_up[ey, ex, xi]
+
+                    nx_face = 0.5 * (eta_x_down[ey, ex, xi] + eta_x_up[ey, ex, xi])
+                    ny_face = 0.5 * (eta_y_down[ey, ex, xi] + eta_y_up[ey, ex, xi])
+                    nz_face = 0.5 * (eta_z_down[ey, ex, xi] + eta_z_up[ey, ex, xi])
+                    n_norm = np.sqrt(nx_face * nx_face + ny_face * ny_face + nz_face * nz_face)
+                    nx_face = nx_face / n_norm
+                    ny_face = ny_face / n_norm
+                    nz_face = nz_face / n_norm
+
+                    tx_face = 0.5 * (dxdxi_down[ey, ex, xi] + dxdxi_up[ey, ex, xi])
+                    ty_face = 0.5 * (dydxi_down[ey, ex, xi] + dydxi_up[ey, ex, xi])
+                    tz_face = 0.5 * (dzdxi_down[ey, ex, xi] + dzdxi_up[ey, ex, xi])
+                    t_norm = np.sqrt(tx_face * tx_face + ty_face * ty_face + tz_face * tz_face)
+                    tx_face = tx_face / t_norm
+                    ty_face = ty_face / t_norm
+                    tz_face = tz_face / t_norm
+
+                    h_avg = 0.5 * (hh_l + hh_r)
+                    c = np.sqrt(g * h_avg)
+                    u_avg = 0.5 * (uu_l + uu_r)
+                    v_avg = 0.5 * (vv_l + vv_r)
+                    w_avg = 0.5 * (ww_l + ww_r)
+                    du = uu_r - uu_l
+                    dv = vv_r - vv_l
+                    dw = ww_r - ww_l
+                    dh = hh_r - hh_l
+
+                    u_n = u_avg * nx_face + v_avg * ny_face + w_avg * nz_face
+                    du_n = du * nx_face + dv * ny_face + dw * nz_face
+                    du_t = du * tx_face + dv * ty_face + dw * tz_face
+
+                    mu_m = abs(u_n - c)
+                    mu_0 = abs(u_n)
+                    mu_p = abs(u_n + c)
+                    amp_m = (g * dh - c * du_n) / (2.0 * g)
+                    amp_p = (g * dh + c * du_n) / (2.0 * g)
+                    amp_0 = h_avg * du_t
+
+                    diss_h = mu_m * amp_m + mu_p * amp_p
+                    diss_u = (
+                        mu_m * amp_m * (u_avg - c * nx_face)
+                        + mu_p * amp_p * (u_avg + c * nx_face)
+                        + mu_0 * amp_0 * tx_face
+                    )
+                    diss_v = (
+                        mu_m * amp_m * (v_avg - c * ny_face)
+                        + mu_p * amp_p * (v_avg + c * ny_face)
+                        + mu_0 * amp_0 * ty_face
+                    )
+                    diss_w = (
+                        mu_m * amp_m * (w_avg - c * nz_face)
+                        + mu_p * amp_p * (w_avg + c * nz_face)
+                        + mu_0 * amp_0 * tz_face
+                    )
+
+                    if ey > 0:
+                        cell_y = ey - 1
+                        eta_idx = n - 1
+                        scale = 0.5 * vert_upper_edge_factor[cell_y, ex, xi]
+                        dh_k = scale * diss_h
+                        dm_u = scale * diss_u
+                        dm_v = scale * diss_v
+                        dm_w = scale * diss_w
+                        h_k[cell_y, ex, eta_idx, xi] += dh_k
+                        u_k[cell_y, ex, eta_idx, xi] += (dm_u - uu_l * dh_k) / hh_l
+                        v_k[cell_y, ex, eta_idx, xi] += (dm_v - vv_l * dh_k) / hh_l
+                        w_k[cell_y, ex, eta_idx, xi] += (dm_w - ww_l * dh_k) / hh_l
+
+                    if ey < ny:
+                        eta_idx = 0
+                        scale = -0.5 * vert_lower_edge_factor[ey, ex, xi]
+                        dh_k = scale * diss_h
+                        dm_u = scale * diss_u
+                        dm_v = scale * diss_v
+                        dm_w = scale * diss_w
+                        h_k[ey, ex, eta_idx, xi] += dh_k
+                        u_k[ey, ex, eta_idx, xi] += (dm_u - uu_r * dh_k) / hh_r
+                        v_k[ey, ex, eta_idx, xi] += (dm_v - vv_r * dh_k) / hh_r
+                        w_k[ey, ex, eta_idx, xi] += (dm_w - ww_r * dh_k) / hh_r
+
+        for ey in range(ny):
+            for ex in range(nx + 1):
+                for eta in range(n):
+                    uu_l = u_left[ey, ex, eta]
+                    vv_l = v_left[ey, ex, eta]
+                    ww_l = w_left[ey, ex, eta]
+                    hh_l = h_left[ey, ex, eta]
+                    uu_r = u_right[ey, ex, eta]
+                    vv_r = v_right[ey, ex, eta]
+                    ww_r = w_right[ey, ex, eta]
+                    hh_r = h_right[ey, ex, eta]
+
+                    nx_face = 0.5 * (xi_x_left[ey, ex, eta] + xi_x_right[ey, ex, eta])
+                    ny_face = 0.5 * (xi_y_left[ey, ex, eta] + xi_y_right[ey, ex, eta])
+                    nz_face = 0.5 * (xi_z_left[ey, ex, eta] + xi_z_right[ey, ex, eta])
+                    n_norm = np.sqrt(nx_face * nx_face + ny_face * ny_face + nz_face * nz_face)
+                    nx_face = nx_face / n_norm
+                    ny_face = ny_face / n_norm
+                    nz_face = nz_face / n_norm
+
+                    tx_face = 0.5 * (dxdeta_left[ey, ex, eta] + dxdeta_right[ey, ex, eta])
+                    ty_face = 0.5 * (dydeta_left[ey, ex, eta] + dydeta_right[ey, ex, eta])
+                    tz_face = 0.5 * (dzdeta_left[ey, ex, eta] + dzdeta_right[ey, ex, eta])
+                    t_norm = np.sqrt(tx_face * tx_face + ty_face * ty_face + tz_face * tz_face)
+                    tx_face = tx_face / t_norm
+                    ty_face = ty_face / t_norm
+                    tz_face = tz_face / t_norm
+
+                    h_avg = 0.5 * (hh_l + hh_r)
+                    c = np.sqrt(g * h_avg)
+                    u_avg = 0.5 * (uu_l + uu_r)
+                    v_avg = 0.5 * (vv_l + vv_r)
+                    w_avg = 0.5 * (ww_l + ww_r)
+                    du = uu_r - uu_l
+                    dv = vv_r - vv_l
+                    dw = ww_r - ww_l
+                    dh = hh_r - hh_l
+
+                    u_n = u_avg * nx_face + v_avg * ny_face + w_avg * nz_face
+                    du_n = du * nx_face + dv * ny_face + dw * nz_face
+                    du_t = du * tx_face + dv * ty_face + dw * tz_face
+
+                    mu_m = abs(u_n - c)
+                    mu_0 = abs(u_n)
+                    mu_p = abs(u_n + c)
+                    amp_m = (g * dh - c * du_n) / (2.0 * g)
+                    amp_p = (g * dh + c * du_n) / (2.0 * g)
+                    amp_0 = h_avg * du_t
+
+                    diss_h = mu_m * amp_m + mu_p * amp_p
+                    diss_u = (
+                        mu_m * amp_m * (u_avg - c * nx_face)
+                        + mu_p * amp_p * (u_avg + c * nx_face)
+                        + mu_0 * amp_0 * tx_face
+                    )
+                    diss_v = (
+                        mu_m * amp_m * (v_avg - c * ny_face)
+                        + mu_p * amp_p * (v_avg + c * ny_face)
+                        + mu_0 * amp_0 * ty_face
+                    )
+                    diss_w = (
+                        mu_m * amp_m * (w_avg - c * nz_face)
+                        + mu_p * amp_p * (w_avg + c * nz_face)
+                        + mu_0 * amp_0 * tz_face
+                    )
+
+                    if ex > 0:
+                        cell_x = ex - 1
+                        xi_idx = n - 1
+                        scale = 0.5 * horz_right_edge_factor[ey, cell_x, eta]
+                        dh_k = scale * diss_h
+                        dm_u = scale * diss_u
+                        dm_v = scale * diss_v
+                        dm_w = scale * diss_w
+                        h_k[ey, cell_x, eta, xi_idx] += dh_k
+                        u_k[ey, cell_x, eta, xi_idx] += (dm_u - uu_l * dh_k) / hh_l
+                        v_k[ey, cell_x, eta, xi_idx] += (dm_v - vv_l * dh_k) / hh_l
+                        w_k[ey, cell_x, eta, xi_idx] += (dm_w - ww_l * dh_k) / hh_l
+
+                    if ex < nx:
+                        xi_idx = 0
+                        scale = -0.5 * horz_left_edge_factor[ey, ex, eta]
+                        dh_k = scale * diss_h
+                        dm_u = scale * diss_u
+                        dm_v = scale * diss_v
+                        dm_w = scale * diss_w
+                        h_k[ey, ex, eta, xi_idx] += dh_k
+                        u_k[ey, ex, eta, xi_idx] += (dm_u - uu_r * dh_k) / hh_r
+                        v_k[ey, ex, eta, xi_idx] += (dm_v - vv_r * dh_k) / hh_r
+                        w_k[ey, ex, eta, xi_idx] += (dm_w - ww_r * dh_k) / hh_r
+
+    @njit(cache=True, fastmath=True, boundscheck=False, nogil=True, error_model="numpy")
     def _solve_numba_old_tangent_kernel(
         u, v, w, h, b,
         D, endpoint_weight, J,
@@ -1296,6 +1519,7 @@ if njit is not None:
 else:
     _solve_numba_kernel = None
     _solve_numba_lmars_kernel = None
+    _apply_barth_diss_numba = None
     _solve_numba_old_tangent_kernel = None
 
 
@@ -1303,10 +1527,11 @@ class DGCubedSphereSWENumpy:
     def __init__(
             self, poly_order, nx, ny, g, f, eps, radius=1.0, device='cpu',
             solution=None, a=0.0, ah=0.0, dtype=np.float64,
-            tangent_diss=False, old_tangent_diss=False,
-            nprocx=1, nprocy=1, comm=None, lmars=False, **kwargs):
+            flux_type="standard", nprocx=1, nprocy=1, comm=None, **kwargs):
 
+        _reject_legacy_flux_kwargs(kwargs)
         self.face_names = ['zp', 'zn', 'xp', 'xn', 'yp', 'yn']
+        flux_type = _validate_flux_type(flux_type)
         self.nprocx = nprocx
         self.nprocy = nprocy
         self.comm = self._get_comm(comm, nprocx, nprocy)
@@ -1352,7 +1577,7 @@ class DGCubedSphereSWENumpy:
         self.faces = {
             name: DGCubedSphereFaceNumpy(
                 name, poly_order, face_nx, face_ny, g, f, radius, eps, device, a=a, ah=ah, dtype=dtype,
-                bc='', tangent_diss=tangent_diss, old_tangent_diss=old_tangent_diss, lmars=lmars,
+                bc='', flux_type=flux_type,
                 x_proc_idx=self.x_proc_idx if self.parallel else 0,
                 y_proc_idx=self.y_proc_idx if self.parallel else 0,
                 nprocx=self.nprocx if self.parallel else 1,
@@ -1366,9 +1591,7 @@ class DGCubedSphereSWENumpy:
 
         self.time = 0
         self.cdt = min(self.faces[n].cdt for n in self.active_face_names)
-        self.tangent_diss = tangent_diss
-        self.old_tangent_diss = old_tangent_diss
-        self.lmars = lmars
+        self.flux_type = flux_type
 
         self.time_list = []
         self.energy_list = []
@@ -2376,15 +2599,17 @@ class DGCubedSphereFaceNumpy:
     def __init__(
             self, name, poly_order, nx, ny, g, f, radius, eps, device='cpu',
             solution=None, a=0.0, ah=0.0, dtype=np.float64, bc='wall',
-            tangent_diss=False, old_tangent_diss=False,
+            flux_type="standard",
             x_proc_idx=0, y_proc_idx=0, nprocx=1, nprocy=1,
             global_nx=None, global_ny=None, x_min=None, x_max=None, y_min=None, y_max=None,
-            lmars=False, **kwargs
+            **kwargs
         ):
 
+        _reject_legacy_flux_kwargs(kwargs)
         valid_names = ['zp', 'zn', 'xp', 'xn', 'yp', 'yn']
         if not name in valid_names:
             raise ValueError(f'name: expected one of: {valid_names}. Found {name}.')
+        flux_type = _validate_flux_type(flux_type)
         self.name = name
         self.time = 0
         self.poly_order = poly_order
@@ -2402,9 +2627,7 @@ class DGCubedSphereFaceNumpy:
         self.bc = bc
         self.geometry = EquiangularFace(name, radius=radius)
         self.connections = self.geometry.connections
-        self.tangent_diss = tangent_diss
-        self.old_tangent_diss = old_tangent_diss
-        self.lmars = lmars
+        self.flux_type = flux_type
 
         [xs_1d, w_x] = gll(poly_order, iterative=True)
         [y_1d, w_y] = gll(poly_order, iterative=True)
@@ -3295,7 +3518,45 @@ class DGCubedSphereFaceNumpy:
             return self.solve_numpy(u, v, w, h, t, dt, verbose=verbose)
 
         self.boundaries(u, v, w, h, t)
-        if (not self.lmars) and self.tangent_diss and self.old_tangent_diss:
+        if self.flux_type == "barth":
+            u_k, v_k, w_k, h_k = _solve_numba_kernel(
+                u, v, w, h, self.b,
+                self.D, self.endpoint_weight, self.J,
+                self.vert_upper_edge_factor, self.vert_lower_edge_factor,
+                self.horz_right_edge_factor, self.horz_left_edge_factor,
+                self.dxidx, self.dxidy, self.dxidz, self.detadx, self.detady, self.detadz,
+                self.dxidx_up, self.dxidy_up, self.dxidz_up, self.dxidx_down, self.dxidy_down, self.dxidz_down,
+                self.dxidx_right, self.dxidy_right, self.dxidz_right, self.dxidx_left, self.dxidy_left, self.dxidz_left,
+                self.detadx_up, self.detady_up, self.detadz_up, self.detadx_down, self.detady_down, self.detadz_down,
+                self.detadx_right, self.detady_right, self.detadz_right, self.detadx_left, self.detady_left, self.detadz_left,
+                self.dxdxi, self.dydxi, self.dzdxi, self.dxdeta, self.dydeta, self.dzdeta,
+                self.f,
+                self.u_up, self.v_up, self.w_up, self.h_up, self.u_down, self.v_down, self.w_down, self.h_down,
+                self.u_right, self.v_right, self.w_right, self.h_right, self.u_left, self.v_left, self.w_left, self.h_left,
+                self.eta_x_up, self.eta_y_up, self.eta_z_up, self.eta_x_down, self.eta_y_down, self.eta_z_down,
+                self.xi_x_right, self.xi_y_right, self.xi_z_right, self.xi_x_left, self.xi_y_left, self.xi_z_left,
+                self.dxdxi_up, self.dydxi_up, self.dzdxi_up, self.dxdxi_down, self.dydxi_down, self.dzdxi_down,
+                self.dxdxi_right, self.dydxi_right, self.dzdxi_right, self.dxdxi_left, self.dydxi_left, self.dzdxi_left,
+                self.dxdeta_up, self.dydeta_up, self.dzdeta_up, self.dxdeta_down, self.dydeta_down, self.dzdeta_down,
+                self.dxdeta_right, self.dydeta_right, self.dzdeta_right, self.dxdeta_left, self.dydeta_left, self.dzdeta_left,
+                self.g, 0.0, 0.0, False,
+            )
+            _apply_barth_diss_numba(
+                u_k, v_k, w_k, h_k, self.g,
+                self.vert_upper_edge_factor, self.vert_lower_edge_factor,
+                self.horz_right_edge_factor, self.horz_left_edge_factor,
+                self.u_up, self.v_up, self.w_up, self.h_up, self.u_down, self.v_down, self.w_down, self.h_down,
+                self.u_right, self.v_right, self.w_right, self.h_right, self.u_left, self.v_left, self.w_left, self.h_left,
+                self.eta_x_up, self.eta_y_up, self.eta_z_up, self.eta_x_down, self.eta_y_down, self.eta_z_down,
+                self.xi_x_right, self.xi_y_right, self.xi_z_right, self.xi_x_left, self.xi_y_left, self.xi_z_left,
+                self.dxdxi_up, self.dydxi_up, self.dzdxi_up, self.dxdxi_down, self.dydxi_down, self.dzdxi_down,
+                self.dxdxi_right, self.dydxi_right, self.dzdxi_right, self.dxdxi_left, self.dydxi_left, self.dzdxi_left,
+                self.dxdeta_up, self.dydeta_up, self.dzdeta_up, self.dxdeta_down, self.dydeta_down, self.dzdeta_down,
+                self.dxdeta_right, self.dydeta_right, self.dzdeta_right, self.dxdeta_left, self.dydeta_left, self.dzdeta_left,
+            )
+            return u_k, v_k, w_k, h_k
+
+        if self.flux_type == "old_tangent":
             return _solve_numba_old_tangent_kernel(
                 u, v, w, h, self.b,
                 self.D, self.endpoint_weight, self.J,
@@ -3320,7 +3581,7 @@ class DGCubedSphereFaceNumpy:
                 self.g, self.a, self.ah,
             )
 
-        kernel = _solve_numba_lmars_kernel if self.lmars else _solve_numba_kernel
+        kernel = _solve_numba_lmars_kernel if self.flux_type == "lmars" else _solve_numba_kernel
         return kernel(
             u, v, w, h, self.b,
             self.D, self.endpoint_weight, self.J,
@@ -3341,16 +3602,18 @@ class DGCubedSphereFaceNumpy:
             self.dxdxi_right, self.dydxi_right, self.dzdxi_right, self.dxdxi_left, self.dydxi_left, self.dzdxi_left,
             self.dxdeta_up, self.dydeta_up, self.dzdeta_up, self.dxdeta_down, self.dydeta_down, self.dzdeta_down,
             self.dxdeta_right, self.dydeta_right, self.dzdeta_right, self.dxdeta_left, self.dydeta_left, self.dzdeta_left,
-            self.g, self.a, self.ah, self.tangent_diss,
+            self.g, self.a, self.ah, self.flux_type == "standard_tangent",
         )
 
     def solve_numpy(self, u, v, w, h, t, dt, *, verbose=False):
-        if self.lmars:
+        if self.flux_type == "barth":
+            return self.solve_numpy_barth_diss(u, v, w, h, t, dt, verbose=verbose)
+        if self.flux_type == "lmars":
             return self.solve_numpy_lmars(u, v, w, h, t, dt, verbose=verbose)
-        if self.tangent_diss and self.old_tangent_diss:
+        if self.flux_type == "old_tangent":
             return self.solve_numpy_old_tangent(u, v, w, h, t, dt, verbose=verbose)
         return self._solve_numpy_standard(
-            u, v, w, h, t, dt, tangent_diss=self.tangent_diss, verbose=verbose
+            u, v, w, h, t, dt, tangent_diss=self.flux_type == "standard_tangent", verbose=verbose
         )
 
     def solve_numpy_lmars(self, u, v, w, h, t, dt, *, verbose=False):
@@ -3365,7 +3628,18 @@ class DGCubedSphereFaceNumpy:
         self._apply_old_tangent_diss_numpy(u_k, v_k, w_k)
         return u_k, v_k, w_k, h_k
 
-    def _solve_numpy_standard(self, u, v, w, h, t, dt, *, tangent_diss, verbose=False):
+    def solve_numpy_barth_diss(self, u, v, w, h, t, dt, *, verbose=False):
+        u_k, v_k, w_k, h_k = self._solve_numpy_standard(
+            u, v, w, h, t, dt, tangent_diss=False, a=0.0, ah=0.0, verbose=verbose
+        )
+        self._apply_barth_diss_numpy(u_k, v_k, w_k, h_k)
+        return u_k, v_k, w_k, h_k
+
+    def _solve_numpy_standard(self, u, v, w, h, t, dt, *, tangent_diss, a=None, ah=None, verbose=False):
+        if a is None:
+            a = self.a
+        if ah is None:
+            ah = self.ah
 
         # copy the boundaries across
         self.boundaries(u, v, w, h, t)
@@ -3440,11 +3714,11 @@ class DGCubedSphereFaceNumpy:
         v_contra_right = self.u_right * self.detadx_right + self.v_right * self.detady_right + self.w_right * self.detadz_right
         v_contra_left = self.u_left * self.detadx_left + self.v_left * self.detady_left + self.w_left * self.detadz_left
 
-        h_flux_vert = c_adv_vert * h_ve - self.ah * abs(c_adv_vert) * (self.h_up - self.h_down)
-        h_flux_horz = c_adv_horz * h_ho - self.ah * abs(c_adv_horz) * (self.h_right - self.h_left)
+        h_flux_vert = c_adv_vert * h_ve - ah * abs(c_adv_vert) * (self.h_up - self.h_down)
+        h_flux_horz = c_adv_horz * h_ho - ah * abs(c_adv_horz) * (self.h_right - self.h_left)
 
-        uv_flux_horz = 0.5 * (uv_right_flux + uv_left_flux) - self.a * (c_snd_ho + abs(c_adv_horz)) * (h_right_flux - h_left_flux) / h_ho
-        uv_flux_vert = 0.5 * (uv_up_flux + uv_down_flux) - self.a * (c_snd_ve + abs(c_adv_vert)) * (h_up_flux - h_down_flux) / h_ve
+        uv_flux_horz = 0.5 * (uv_right_flux + uv_left_flux) - a * (c_snd_ho + abs(c_adv_horz)) * (h_right_flux - h_left_flux) / h_ho
+        uv_flux_vert = 0.5 * (uv_up_flux + uv_down_flux) - a * (c_snd_ve + abs(c_adv_vert)) * (h_up_flux - h_down_flux) / h_ve
 
         if tangent_diss:
             u_cov_vert_avg = (c_adv_vert < 0) * u_cov_up + (c_adv_vert >= 0) * u_cov_down
@@ -3558,6 +3832,129 @@ class DGCubedSphereFaceNumpy:
         u_k, v_k, w_k = self.cov_to_phys(u_k, v_k, 0)
 
         return u_k, v_k, w_k, h_k
+
+    def _barth_dissipation_numpy(
+            self,
+            u_l, v_l, w_l, h_l,
+            u_r, v_r, w_r, h_r,
+            n_x, n_y, n_z,
+            t_x, t_y, t_z,
+    ):
+        n_norm = np.sqrt(n_x ** 2 + n_y ** 2 + n_z ** 2)
+        n_x = n_x / n_norm
+        n_y = n_y / n_norm
+        n_z = n_z / n_norm
+
+        t_norm = np.sqrt(t_x ** 2 + t_y ** 2 + t_z ** 2)
+        t_x = t_x / t_norm
+        t_y = t_y / t_norm
+        t_z = t_z / t_norm
+
+        h_avg = 0.5 * (h_l + h_r)
+        c = np.sqrt(self.g * h_avg)
+        u_avg = 0.5 * (u_l + u_r)
+        v_avg = 0.5 * (v_l + v_r)
+        w_avg = 0.5 * (w_l + w_r)
+        du = u_r - u_l
+        dv = v_r - v_l
+        dw = w_r - w_l
+        dh = h_r - h_l
+
+        u_n = u_avg * n_x + v_avg * n_y + w_avg * n_z
+        du_n = du * n_x + dv * n_y + dw * n_z
+        du_t = du * t_x + dv * t_y + dw * t_z
+
+        mu_m = np.abs(u_n - c)
+        mu_0 = np.abs(u_n)
+        mu_p = np.abs(u_n + c)
+        amp_m = (self.g * dh - c * du_n) / (2.0 * self.g)
+        amp_p = (self.g * dh + c * du_n) / (2.0 * self.g)
+        amp_0 = h_avg * du_t
+
+        diss_h = mu_m * amp_m + mu_p * amp_p
+        diss_u = (
+            mu_m * amp_m * (u_avg - c * n_x)
+            + mu_p * amp_p * (u_avg + c * n_x)
+            + mu_0 * amp_0 * t_x
+        )
+        diss_v = (
+            mu_m * amp_m * (v_avg - c * n_y)
+            + mu_p * amp_p * (v_avg + c * n_y)
+            + mu_0 * amp_0 * t_y
+        )
+        diss_w = (
+            mu_m * amp_m * (w_avg - c * n_z)
+            + mu_p * amp_p * (w_avg + c * n_z)
+            + mu_0 * amp_0 * t_z
+        )
+        return diss_u, diss_v, diss_w, diss_h
+
+    def _apply_barth_diss_numpy(self, u_k, v_k, w_k, h_k):
+        diss_u, diss_v, diss_w, diss_h = self._barth_dissipation_numpy(
+            self.u_down, self.v_down, self.w_down, self.h_down,
+            self.u_up, self.v_up, self.w_up, self.h_up,
+            0.5 * (self.eta_x_down + self.eta_x_up),
+            0.5 * (self.eta_y_down + self.eta_y_up),
+            0.5 * (self.eta_z_down + self.eta_z_up),
+            0.5 * (self.dxdxi_down + self.dxdxi_up),
+            0.5 * (self.dydxi_down + self.dydxi_up),
+            0.5 * (self.dzdxi_down + self.dzdxi_up),
+        )
+
+        scale = 0.5 * self.vert_upper_edge_factor
+        dh_k = scale * diss_h[1:]
+        dm_u = scale * diss_u[1:]
+        dm_v = scale * diss_v[1:]
+        dm_w = scale * diss_w[1:]
+        h_l = self.h_down[1:]
+        h_k[:, :, -1] += dh_k
+        u_k[:, :, -1] += (dm_u - self.u_down[1:] * dh_k) / h_l
+        v_k[:, :, -1] += (dm_v - self.v_down[1:] * dh_k) / h_l
+        w_k[:, :, -1] += (dm_w - self.w_down[1:] * dh_k) / h_l
+
+        scale = -0.5 * self.vert_lower_edge_factor
+        dh_k = scale * diss_h[:-1]
+        dm_u = scale * diss_u[:-1]
+        dm_v = scale * diss_v[:-1]
+        dm_w = scale * diss_w[:-1]
+        h_r = self.h_up[:-1]
+        h_k[:, :, 0] += dh_k
+        u_k[:, :, 0] += (dm_u - self.u_up[:-1] * dh_k) / h_r
+        v_k[:, :, 0] += (dm_v - self.v_up[:-1] * dh_k) / h_r
+        w_k[:, :, 0] += (dm_w - self.w_up[:-1] * dh_k) / h_r
+
+        diss_u, diss_v, diss_w, diss_h = self._barth_dissipation_numpy(
+            self.u_left, self.v_left, self.w_left, self.h_left,
+            self.u_right, self.v_right, self.w_right, self.h_right,
+            0.5 * (self.xi_x_left + self.xi_x_right),
+            0.5 * (self.xi_y_left + self.xi_y_right),
+            0.5 * (self.xi_z_left + self.xi_z_right),
+            0.5 * (self.dxdeta_left + self.dxdeta_right),
+            0.5 * (self.dydeta_left + self.dydeta_right),
+            0.5 * (self.dzdeta_left + self.dzdeta_right),
+        )
+
+        scale = 0.5 * self.horz_right_edge_factor
+        dh_k = scale * diss_h[:, 1:]
+        dm_u = scale * diss_u[:, 1:]
+        dm_v = scale * diss_v[:, 1:]
+        dm_w = scale * diss_w[:, 1:]
+        h_l = self.h_left[:, 1:]
+        h_k[:, :, :, -1] += dh_k
+        u_k[:, :, :, -1] += (dm_u - self.u_left[:, 1:] * dh_k) / h_l
+        v_k[:, :, :, -1] += (dm_v - self.v_left[:, 1:] * dh_k) / h_l
+        w_k[:, :, :, -1] += (dm_w - self.w_left[:, 1:] * dh_k) / h_l
+
+        scale = -0.5 * self.horz_left_edge_factor
+        dh_k = scale * diss_h[:, :-1]
+        dm_u = scale * diss_u[:, :-1]
+        dm_v = scale * diss_v[:, :-1]
+        dm_w = scale * diss_w[:, :-1]
+        h_r = self.h_right[:, :-1]
+        h_k[:, :, :, 0] += dh_k
+        u_k[:, :, :, 0] += (dm_u - self.u_right[:, :-1] * dh_k) / h_r
+        v_k[:, :, :, 0] += (dm_v - self.v_right[:, :-1] * dh_k) / h_r
+        w_k[:, :, :, 0] += (dm_w - self.w_right[:, :-1] * dh_k) / h_r
 
     def _solve_numpy_lmars_kernel(self, u, v, w, h, t, dt, *, tangent_diss, verbose=False):
 
