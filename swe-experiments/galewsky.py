@@ -148,7 +148,7 @@ if mode == 'run':
             poly_order, nx, ny, g, f,
             eps, a=a, radius=radius,
             dtype=np.float64, tangent_diss=tangent_diss, ah=ah, 
-            nprocx=nprocx, nprocy=nprocy, old_tangent_diss=old_tangent_diss, lmars=lmars
+            nprocx=nprocx, nprocy=nprocy, old_tangent_diss=old_tangent_diss
         )
 
         for face in solver.faces.values():
