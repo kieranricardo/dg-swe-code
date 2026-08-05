@@ -258,6 +258,21 @@ if mode == 'plot':
     print('Max froude number:', froude_number.max())
     print('Max wave speed:', (speed + np.sqrt(g * h_plot)).max())
 
+    cmap = cmocean.cm.curl
+    vmin=-2.25e-5
+    vmax=2.25e-5
+    vort_plot = solver.vorticity()['zp']
+    vort_plot -= solver.faces['zp'].f
+    plt.figure(figsize=(10, 5), dpi=400)
+    plt.title('Relative vorticity')
+    plt.tricontourf(solver.faces['zp'].xs.ravel(), solver.faces['zp'].ys.ravel(), vort_plot.ravel(), cmap=cmap, vmin=vmin, vmax=vmax, levels=100)
+    plt.xlabel('x (m)')
+    plt.ylabel('y (m)')
+    plt.colorbar()
+
+    plt.savefig(f'./{plot_dir}/vort_polar_{fn_template}.png')
+
+
 
 
 if mode == 'restart':
