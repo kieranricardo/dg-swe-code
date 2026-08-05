@@ -20,10 +20,8 @@ else:
     nprocx = nprocy = int(np.sqrt(size // 6))
 
 cfl = 1.3
-tangent_diss = True
 h_diss = True
-old_tangent_diss = True
-lmars = False
+flux_type = "barth"
 
 if h_diss:
     ah = 0.5
@@ -71,12 +69,14 @@ dt = cfl * 0.5 * dx_min / wave_speed
 def get_fn_template(day=None):
     suffix = ''
 
-    if lmars:
-            suffix = suffix + f'lmars'
+    if flux_type == "lmars":
+        suffix = suffix + f'lmars'
+    elif flux_type == "barth":
+        suffix = suffix + f'barth'
     else:
-        if old_tangent_diss and tangent_diss:
+        if flux_type == "old_tangent":
             suffix = suffix + 'old_tangent_diss'
-        elif tangent_diss:
+        elif flux_type == "standard_tangent":
             suffix = suffix + 'tangent_diss'
 
         if h_diss:
@@ -161,8 +161,8 @@ def plot_orography(idx):
 solver = DGCubedSphereSWENumpy(
     poly_order, nx, ny, g, f,
     eps=0.0, a=0.5, ah=ah, radius=radius,
-    dtype=np.float64, tangent_diss=tangent_diss,
-    nprocx=nprocx, nprocy=nprocy, lmars=lmars
+    dtype=np.float64, flux_type=flux_type,
+    nprocx=nprocx, nprocy=nprocy,
 )
 
 for face in solver.faces.values():

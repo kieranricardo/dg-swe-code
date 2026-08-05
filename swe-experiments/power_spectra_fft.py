@@ -19,10 +19,8 @@ s_0 = 3000
 poly_order = 3
 a = 0.5
 
-old_tangent_diss = True
-tangent_diss = True
 h_diss = False
-lmars = True
+flux_type = "lmars"
 
 if h_diss:
     ah = 0.5
@@ -38,7 +36,14 @@ nlon = max(8 * max_n + 2, 4 * (nx - 1) * (poly_order + 1) + 2)
 
 def get_rw_fn_template(day=None):
     suffix = ''
-    if tangent_diss:
+
+    if flux_type == "lmars":
+        suffix = suffix + 'lmars'
+    elif flux_type == "barth":
+        suffix = suffix + 'barth'
+    elif flux_type == "old_tangent":
+        suffix = suffix + 'old_tangent_diss'
+    elif flux_type == "standard_tangent":
         suffix = suffix + 'tangent_diss'
 
     if h_diss:
@@ -58,15 +63,17 @@ def get_rw_fn_template(day=None):
 def get_galewsky_fn_template(day=None):
     suffix = ''
     
-    if lmars:
+    if flux_type == "lmars":
         suffix = suffix + f'lmars'
+    elif flux_type == "barth":
+        suffix = suffix + f'barth'
 
     else:
         suffix = suffix + f'a_{a}'
 
-        if old_tangent_diss and tangent_diss:
+        if flux_type == "old_tangent":
             suffix = suffix + '_old_tangent_diss'
-        elif tangent_diss:
+        elif flux_type == "standard_tangent":
             suffix = suffix + '_tangent_diss'
 
         if h_diss:
@@ -340,7 +347,7 @@ def main():
     solver = DGCubedSphereSWENumpy(
         poly_order, nx, ny, g, f,
         eps, radius=radius,
-        dtype=np.float64, tangent_diss=tangent_diss
+        dtype=np.float64, flux_type=flux_type,
     )
 
     if use_siac:

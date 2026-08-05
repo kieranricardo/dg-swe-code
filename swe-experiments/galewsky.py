@@ -94,18 +94,20 @@ def initial_condition(face):
     return u, v, w, h
 
 
-def get_fn_template(a, tangent_diss, h_diss, old_tangent_diss=False, lmars=False, day=None):
+def get_fn_template(a, flux_type, h_diss, day=None):
     suffix = ''
 
-    if lmars:
+    if flux_type == "lmars":
         suffix = suffix + f'lmars'
+    elif flux_type == "barth":
+        suffix = suffix + f'barth'
 
     else:
         suffix = suffix + f'a_{a}'
 
-        if old_tangent_diss and tangent_diss:
+        if flux_type == "old_tangent":
             suffix = suffix + '_old_tangent_diss'
-        elif tangent_diss:
+        elif flux_type == "standard_tangent":
             suffix = suffix + '_tangent_diss'
 
         if h_diss:
@@ -118,7 +120,7 @@ def get_fn_template(a, tangent_diss, h_diss, old_tangent_diss=False, lmars=False
 
 
 parameters_list = [
-    dict(a=0.5, tangent_diss=True, h_diss=False, old_tangent_diss=False, lmars=True),
+    dict(a=0.5, flux_type="barth", h_diss=False),
 ]
 
 if mode == 'run':
@@ -126,10 +128,8 @@ if mode == 'run':
     for parameters in parameters_list:
 
         a = parameters['a']
-        tangent_diss = parameters['tangent_diss']
+        flux_type = parameters['flux_type']
         h_diss = parameters['h_diss']
-        old_tangent_diss = parameters['old_tangent_diss']
-        lmars = parameters['lmars']
 
         if parameters['h_diss']:
             ah = 0.5
@@ -147,8 +147,8 @@ if mode == 'run':
         solver = DGCubedSphereSWENumpy(
             poly_order, nx, ny, g, f,
             eps, a=a, radius=radius,
-            dtype=np.float64, tangent_diss=tangent_diss, ah=ah, 
-            nprocx=nprocx, nprocy=nprocy, old_tangent_diss=old_tangent_diss
+            dtype=np.float64, flux_type=flux_type, ah=ah,
+            nprocx=nprocx, nprocy=nprocy,
         )
 
         for face in solver.faces.values():
@@ -161,7 +161,7 @@ if mode == 'run':
             print('Time step:', dt)
             print('Starting', get_fn_template(**parameters))
             print('a:', solver.faces['zp'].a, 'res:', nx, ny)
-            print('ah:', solver.faces['zp'].ah, 'tangent_diss:', solver.faces['zp'].tangent_diss)
+            print('ah:', solver.faces['zp'].ah, 'flux_type:', solver.faces['zp'].flux_type)
 
         for i in range(20):
             if rank == 0:
