@@ -158,6 +158,8 @@ if mode == 'run':
         for face in solver.faces.values():
             face.set_initial_condition(*initial_condition(face))
         solver.boundaries()
+        fn_template = get_fn_template(day=0, **parameters)
+        solver.save_restart(fn_template, data_dir)
 
         # face = solver.faces['zp']
         # vel = np.sqrt(face.u.ravel()**2 + face.v.ravel()**2 + face.w.ravel()**2)
