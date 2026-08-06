@@ -105,6 +105,8 @@ def get_fn_template(a, flux_type, h_diss, day=None):
         suffix = suffix + f'lmars'
     elif flux_type == "barth":
         suffix = suffix + f'barth'
+    elif flux_type == "barth_normal_tangent":
+        suffix = suffix + f'barth_normal_tangent'
 
     else:
         suffix = suffix + f'a_{a}'

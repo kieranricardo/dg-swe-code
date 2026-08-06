@@ -32,6 +32,7 @@ VALID_FLUX_TYPES = (
     "old_tangent",
     "lmars",
     "barth",
+    "barth_normal_tangent",
 )
 
 
@@ -1271,6 +1272,7 @@ if njit is not None:
         dxdxi_right, dydxi_right, dzdxi_right, dxdxi_left, dydxi_left, dzdxi_left,
         dxdeta_up, dydeta_up, dzdeta_up, dxdeta_down, dydeta_down, dzdeta_down,
         dxdeta_right, dydeta_right, dzdeta_right, dxdeta_left, dydeta_left, dzdeta_left,
+        normal_only,
     ):
         ny, nx, n, _ = u_k.shape
 
@@ -1321,49 +1323,66 @@ if njit is not None:
                     mu_p = abs(u_n + c)
                     amp_m = (g * dh - c * du_n) / (2.0 * g)
                     amp_p = (g * dh + c * du_n) / (2.0 * g)
-                    amp_0 = h_avg * du_t
 
                     diss_h = mu_m * amp_m + mu_p * amp_p
-                    diss_u = (
-                        mu_m * amp_m * (u_avg - c * nx_face)
-                        + mu_p * amp_p * (u_avg + c * nx_face)
-                        + mu_0 * amp_0 * tx_face
-                    )
-                    diss_v = (
-                        mu_m * amp_m * (v_avg - c * ny_face)
-                        + mu_p * amp_p * (v_avg + c * ny_face)
-                        + mu_0 * amp_0 * ty_face
-                    )
-                    diss_w = (
-                        mu_m * amp_m * (w_avg - c * nz_face)
-                        + mu_p * amp_p * (w_avg + c * nz_face)
-                        + mu_0 * amp_0 * tz_face
-                    )
+                    if normal_only:
+                        diss_un = mu_m * amp_m * (u_n - c) + mu_p * amp_p * (u_n + c)
+                    else:
+                        amp_0 = h_avg * du_t
+                        diss_u = (
+                            mu_m * amp_m * (u_avg - c * nx_face)
+                            + mu_p * amp_p * (u_avg + c * nx_face)
+                            + mu_0 * amp_0 * tx_face
+                        )
+                        diss_v = (
+                            mu_m * amp_m * (v_avg - c * ny_face)
+                            + mu_p * amp_p * (v_avg + c * ny_face)
+                            + mu_0 * amp_0 * ty_face
+                        )
+                        diss_w = (
+                            mu_m * amp_m * (w_avg - c * nz_face)
+                            + mu_p * amp_p * (w_avg + c * nz_face)
+                            + mu_0 * amp_0 * tz_face
+                        )
 
                     if ey > 0:
                         cell_y = ey - 1
                         eta_idx = n - 1
                         scale = 0.5 * vert_upper_edge_factor[cell_y, ex, xi]
                         dh_k = scale * diss_h
-                        dm_u = scale * diss_u
-                        dm_v = scale * diss_v
-                        dm_w = scale * diss_w
                         h_k[cell_y, ex, eta_idx, xi] += dh_k
-                        u_k[cell_y, ex, eta_idx, xi] += (dm_u - uu_l * dh_k) / hh_l
-                        v_k[cell_y, ex, eta_idx, xi] += (dm_v - vv_l * dh_k) / hh_l
-                        w_k[cell_y, ex, eta_idx, xi] += (dm_w - ww_l * dh_k) / hh_l
+                        if normal_only:
+                            un_l = uu_l * nx_face + vv_l * ny_face + ww_l * nz_face
+                            dun = (scale * diss_un - un_l * dh_k) / hh_l
+                            u_k[cell_y, ex, eta_idx, xi] += dun * nx_face
+                            v_k[cell_y, ex, eta_idx, xi] += dun * ny_face
+                            w_k[cell_y, ex, eta_idx, xi] += dun * nz_face
+                        else:
+                            dm_u = scale * diss_u
+                            dm_v = scale * diss_v
+                            dm_w = scale * diss_w
+                            u_k[cell_y, ex, eta_idx, xi] += (dm_u - uu_l * dh_k) / hh_l
+                            v_k[cell_y, ex, eta_idx, xi] += (dm_v - vv_l * dh_k) / hh_l
+                            w_k[cell_y, ex, eta_idx, xi] += (dm_w - ww_l * dh_k) / hh_l
 
                     if ey < ny:
                         eta_idx = 0
                         scale = -0.5 * vert_lower_edge_factor[ey, ex, xi]
                         dh_k = scale * diss_h
-                        dm_u = scale * diss_u
-                        dm_v = scale * diss_v
-                        dm_w = scale * diss_w
                         h_k[ey, ex, eta_idx, xi] += dh_k
-                        u_k[ey, ex, eta_idx, xi] += (dm_u - uu_r * dh_k) / hh_r
-                        v_k[ey, ex, eta_idx, xi] += (dm_v - vv_r * dh_k) / hh_r
-                        w_k[ey, ex, eta_idx, xi] += (dm_w - ww_r * dh_k) / hh_r
+                        if normal_only:
+                            un_r = uu_r * nx_face + vv_r * ny_face + ww_r * nz_face
+                            dun = (scale * diss_un - un_r * dh_k) / hh_r
+                            u_k[ey, ex, eta_idx, xi] += dun * nx_face
+                            v_k[ey, ex, eta_idx, xi] += dun * ny_face
+                            w_k[ey, ex, eta_idx, xi] += dun * nz_face
+                        else:
+                            dm_u = scale * diss_u
+                            dm_v = scale * diss_v
+                            dm_w = scale * diss_w
+                            u_k[ey, ex, eta_idx, xi] += (dm_u - uu_r * dh_k) / hh_r
+                            v_k[ey, ex, eta_idx, xi] += (dm_v - vv_r * dh_k) / hh_r
+                            w_k[ey, ex, eta_idx, xi] += (dm_w - ww_r * dh_k) / hh_r
 
         for ey in range(ny):
             for ex in range(nx + 1):
@@ -1412,49 +1431,66 @@ if njit is not None:
                     mu_p = abs(u_n + c)
                     amp_m = (g * dh - c * du_n) / (2.0 * g)
                     amp_p = (g * dh + c * du_n) / (2.0 * g)
-                    amp_0 = h_avg * du_t
 
                     diss_h = mu_m * amp_m + mu_p * amp_p
-                    diss_u = (
-                        mu_m * amp_m * (u_avg - c * nx_face)
-                        + mu_p * amp_p * (u_avg + c * nx_face)
-                        + mu_0 * amp_0 * tx_face
-                    )
-                    diss_v = (
-                        mu_m * amp_m * (v_avg - c * ny_face)
-                        + mu_p * amp_p * (v_avg + c * ny_face)
-                        + mu_0 * amp_0 * ty_face
-                    )
-                    diss_w = (
-                        mu_m * amp_m * (w_avg - c * nz_face)
-                        + mu_p * amp_p * (w_avg + c * nz_face)
-                        + mu_0 * amp_0 * tz_face
-                    )
+                    if normal_only:
+                        diss_un = mu_m * amp_m * (u_n - c) + mu_p * amp_p * (u_n + c)
+                    else:
+                        amp_0 = h_avg * du_t
+                        diss_u = (
+                            mu_m * amp_m * (u_avg - c * nx_face)
+                            + mu_p * amp_p * (u_avg + c * nx_face)
+                            + mu_0 * amp_0 * tx_face
+                        )
+                        diss_v = (
+                            mu_m * amp_m * (v_avg - c * ny_face)
+                            + mu_p * amp_p * (v_avg + c * ny_face)
+                            + mu_0 * amp_0 * ty_face
+                        )
+                        diss_w = (
+                            mu_m * amp_m * (w_avg - c * nz_face)
+                            + mu_p * amp_p * (w_avg + c * nz_face)
+                            + mu_0 * amp_0 * tz_face
+                        )
 
                     if ex > 0:
                         cell_x = ex - 1
                         xi_idx = n - 1
                         scale = 0.5 * horz_right_edge_factor[ey, cell_x, eta]
                         dh_k = scale * diss_h
-                        dm_u = scale * diss_u
-                        dm_v = scale * diss_v
-                        dm_w = scale * diss_w
                         h_k[ey, cell_x, eta, xi_idx] += dh_k
-                        u_k[ey, cell_x, eta, xi_idx] += (dm_u - uu_l * dh_k) / hh_l
-                        v_k[ey, cell_x, eta, xi_idx] += (dm_v - vv_l * dh_k) / hh_l
-                        w_k[ey, cell_x, eta, xi_idx] += (dm_w - ww_l * dh_k) / hh_l
+                        if normal_only:
+                            un_l = uu_l * nx_face + vv_l * ny_face + ww_l * nz_face
+                            dun = (scale * diss_un - un_l * dh_k) / hh_l
+                            u_k[ey, cell_x, eta, xi_idx] += dun * nx_face
+                            v_k[ey, cell_x, eta, xi_idx] += dun * ny_face
+                            w_k[ey, cell_x, eta, xi_idx] += dun * nz_face
+                        else:
+                            dm_u = scale * diss_u
+                            dm_v = scale * diss_v
+                            dm_w = scale * diss_w
+                            u_k[ey, cell_x, eta, xi_idx] += (dm_u - uu_l * dh_k) / hh_l
+                            v_k[ey, cell_x, eta, xi_idx] += (dm_v - vv_l * dh_k) / hh_l
+                            w_k[ey, cell_x, eta, xi_idx] += (dm_w - ww_l * dh_k) / hh_l
 
                     if ex < nx:
                         xi_idx = 0
                         scale = -0.5 * horz_left_edge_factor[ey, ex, eta]
                         dh_k = scale * diss_h
-                        dm_u = scale * diss_u
-                        dm_v = scale * diss_v
-                        dm_w = scale * diss_w
                         h_k[ey, ex, eta, xi_idx] += dh_k
-                        u_k[ey, ex, eta, xi_idx] += (dm_u - uu_r * dh_k) / hh_r
-                        v_k[ey, ex, eta, xi_idx] += (dm_v - vv_r * dh_k) / hh_r
-                        w_k[ey, ex, eta, xi_idx] += (dm_w - ww_r * dh_k) / hh_r
+                        if normal_only:
+                            un_r = uu_r * nx_face + vv_r * ny_face + ww_r * nz_face
+                            dun = (scale * diss_un - un_r * dh_k) / hh_r
+                            u_k[ey, ex, eta, xi_idx] += dun * nx_face
+                            v_k[ey, ex, eta, xi_idx] += dun * ny_face
+                            w_k[ey, ex, eta, xi_idx] += dun * nz_face
+                        else:
+                            dm_u = scale * diss_u
+                            dm_v = scale * diss_v
+                            dm_w = scale * diss_w
+                            u_k[ey, ex, eta, xi_idx] += (dm_u - uu_r * dh_k) / hh_r
+                            v_k[ey, ex, eta, xi_idx] += (dm_v - vv_r * dh_k) / hh_r
+                            w_k[ey, ex, eta, xi_idx] += (dm_w - ww_r * dh_k) / hh_r
 
     @njit(cache=True, fastmath=True, boundscheck=False, nogil=True, error_model="numpy")
     def _solve_numba_old_tangent_kernel(
@@ -3521,7 +3557,8 @@ class DGCubedSphereFaceNumpy:
             return self.solve_numpy(u, v, w, h, t, dt, verbose=verbose)
 
         self.boundaries(u, v, w, h, t)
-        if self.flux_type == "barth":
+        if self.flux_type in ("barth", "barth_normal_tangent"):
+            normal_only_barth = self.flux_type == "barth_normal_tangent"
             u_k, v_k, w_k, h_k = _solve_numba_kernel(
                 u, v, w, h, self.b,
                 self.D, self.endpoint_weight, self.J,
@@ -3542,7 +3579,7 @@ class DGCubedSphereFaceNumpy:
                 self.dxdxi_right, self.dydxi_right, self.dzdxi_right, self.dxdxi_left, self.dydxi_left, self.dzdxi_left,
                 self.dxdeta_up, self.dydeta_up, self.dzdeta_up, self.dxdeta_down, self.dydeta_down, self.dzdeta_down,
                 self.dxdeta_right, self.dydeta_right, self.dzdeta_right, self.dxdeta_left, self.dydeta_left, self.dzdeta_left,
-                self.g, 0.0, 0.0, False,
+                self.g, 0.0, 0.0, normal_only_barth,
             )
             _apply_barth_diss_numba(
                 u_k, v_k, w_k, h_k, self.g,
@@ -3556,6 +3593,7 @@ class DGCubedSphereFaceNumpy:
                 self.dxdxi_right, self.dydxi_right, self.dzdxi_right, self.dxdxi_left, self.dydxi_left, self.dzdxi_left,
                 self.dxdeta_up, self.dydeta_up, self.dzdeta_up, self.dxdeta_down, self.dydeta_down, self.dzdeta_down,
                 self.dxdeta_right, self.dydeta_right, self.dzdeta_right, self.dxdeta_left, self.dydeta_left, self.dzdeta_left,
+                normal_only_barth,
             )
             return u_k, v_k, w_k, h_k
 
@@ -3610,7 +3648,13 @@ class DGCubedSphereFaceNumpy:
 
     def solve_numpy(self, u, v, w, h, t, dt, *, verbose=False):
         if self.flux_type == "barth":
-            return self.solve_numpy_barth_diss(u, v, w, h, t, dt, verbose=verbose)
+            return self.solve_numpy_barth_diss(
+                u, v, w, h, t, dt, tangent_diss=False, normal_only=False, verbose=verbose
+            )
+        if self.flux_type == "barth_normal_tangent":
+            return self.solve_numpy_barth_diss(
+                u, v, w, h, t, dt, tangent_diss=True, normal_only=True, verbose=verbose
+            )
         if self.flux_type == "lmars":
             return self.solve_numpy_lmars(u, v, w, h, t, dt, verbose=verbose)
         if self.flux_type == "old_tangent":
@@ -3631,11 +3675,11 @@ class DGCubedSphereFaceNumpy:
         self._apply_old_tangent_diss_numpy(u_k, v_k, w_k)
         return u_k, v_k, w_k, h_k
 
-    def solve_numpy_barth_diss(self, u, v, w, h, t, dt, *, verbose=False):
+    def solve_numpy_barth_diss(self, u, v, w, h, t, dt, *, tangent_diss, normal_only, verbose=False):
         u_k, v_k, w_k, h_k = self._solve_numpy_standard(
-            u, v, w, h, t, dt, tangent_diss=False, a=0.0, ah=0.0, verbose=verbose
+            u, v, w, h, t, dt, tangent_diss=tangent_diss, a=0.0, ah=0.0, verbose=verbose
         )
-        self._apply_barth_diss_numpy(u_k, v_k, w_k, h_k)
+        self._apply_barth_diss_numpy(u_k, v_k, w_k, h_k, normal_only=normal_only)
         return u_k, v_k, w_k, h_k
 
     def _solve_numpy_standard(self, u, v, w, h, t, dt, *, tangent_diss, a=None, ah=None, verbose=False):
@@ -3842,6 +3886,7 @@ class DGCubedSphereFaceNumpy:
             u_r, v_r, w_r, h_r,
             n_x, n_y, n_z,
             t_x, t_y, t_z,
+            normal_only=False,
     ):
         n_norm = np.sqrt(n_x ** 2 + n_y ** 2 + n_z ** 2)
         n_x = n_x / n_norm
@@ -3872,9 +3917,13 @@ class DGCubedSphereFaceNumpy:
         mu_p = np.abs(u_n + c)
         amp_m = (self.g * dh - c * du_n) / (2.0 * self.g)
         amp_p = (self.g * dh + c * du_n) / (2.0 * self.g)
-        amp_0 = h_avg * du_t
 
         diss_h = mu_m * amp_m + mu_p * amp_p
+        if normal_only:
+            diss_un = mu_m * amp_m * (u_n - c) + mu_p * amp_p * (u_n + c)
+            return diss_un, diss_h, n_x, n_y, n_z
+
+        amp_0 = h_avg * du_t
         diss_u = (
             mu_m * amp_m * (u_avg - c * n_x)
             + mu_p * amp_p * (u_avg + c * n_x)
@@ -3892,72 +3941,142 @@ class DGCubedSphereFaceNumpy:
         )
         return diss_u, diss_v, diss_w, diss_h
 
-    def _apply_barth_diss_numpy(self, u_k, v_k, w_k, h_k):
-        diss_u, diss_v, diss_w, diss_h = self._barth_dissipation_numpy(
-            self.u_down, self.v_down, self.w_down, self.h_down,
-            self.u_up, self.v_up, self.w_up, self.h_up,
-            0.5 * (self.eta_x_down + self.eta_x_up),
-            0.5 * (self.eta_y_down + self.eta_y_up),
-            0.5 * (self.eta_z_down + self.eta_z_up),
-            0.5 * (self.dxdxi_down + self.dxdxi_up),
-            0.5 * (self.dydxi_down + self.dydxi_up),
-            0.5 * (self.dzdxi_down + self.dzdxi_up),
-        )
+    def _apply_barth_diss_numpy(self, u_k, v_k, w_k, h_k, *, normal_only):
+        if normal_only:
+            diss_un, diss_h, n_x, n_y, n_z = self._barth_dissipation_numpy(
+                self.u_down, self.v_down, self.w_down, self.h_down,
+                self.u_up, self.v_up, self.w_up, self.h_up,
+                0.5 * (self.eta_x_down + self.eta_x_up),
+                0.5 * (self.eta_y_down + self.eta_y_up),
+                0.5 * (self.eta_z_down + self.eta_z_up),
+                0.5 * (self.dxdxi_down + self.dxdxi_up),
+                0.5 * (self.dydxi_down + self.dydxi_up),
+                0.5 * (self.dzdxi_down + self.dzdxi_up),
+                normal_only=True,
+            )
+        else:
+            diss_u, diss_v, diss_w, diss_h = self._barth_dissipation_numpy(
+                self.u_down, self.v_down, self.w_down, self.h_down,
+                self.u_up, self.v_up, self.w_up, self.h_up,
+                0.5 * (self.eta_x_down + self.eta_x_up),
+                0.5 * (self.eta_y_down + self.eta_y_up),
+                0.5 * (self.eta_z_down + self.eta_z_up),
+                0.5 * (self.dxdxi_down + self.dxdxi_up),
+                0.5 * (self.dydxi_down + self.dydxi_up),
+                0.5 * (self.dzdxi_down + self.dzdxi_up),
+            )
 
         scale = 0.5 * self.vert_upper_edge_factor
         dh_k = scale * diss_h[1:]
-        dm_u = scale * diss_u[1:]
-        dm_v = scale * diss_v[1:]
-        dm_w = scale * diss_w[1:]
         h_l = self.h_down[1:]
         h_k[:, :, -1] += dh_k
-        u_k[:, :, -1] += (dm_u - self.u_down[1:] * dh_k) / h_l
-        v_k[:, :, -1] += (dm_v - self.v_down[1:] * dh_k) / h_l
-        w_k[:, :, -1] += (dm_w - self.w_down[1:] * dh_k) / h_l
+        if normal_only:
+            un_l = (
+                self.u_down[1:] * n_x[1:]
+                + self.v_down[1:] * n_y[1:]
+                + self.w_down[1:] * n_z[1:]
+            )
+            dun = (scale * diss_un[1:] - un_l * dh_k) / h_l
+            u_k[:, :, -1] += dun * n_x[1:]
+            v_k[:, :, -1] += dun * n_y[1:]
+            w_k[:, :, -1] += dun * n_z[1:]
+        else:
+            dm_u = scale * diss_u[1:]
+            dm_v = scale * diss_v[1:]
+            dm_w = scale * diss_w[1:]
+            u_k[:, :, -1] += (dm_u - self.u_down[1:] * dh_k) / h_l
+            v_k[:, :, -1] += (dm_v - self.v_down[1:] * dh_k) / h_l
+            w_k[:, :, -1] += (dm_w - self.w_down[1:] * dh_k) / h_l
 
         scale = -0.5 * self.vert_lower_edge_factor
         dh_k = scale * diss_h[:-1]
-        dm_u = scale * diss_u[:-1]
-        dm_v = scale * diss_v[:-1]
-        dm_w = scale * diss_w[:-1]
         h_r = self.h_up[:-1]
         h_k[:, :, 0] += dh_k
-        u_k[:, :, 0] += (dm_u - self.u_up[:-1] * dh_k) / h_r
-        v_k[:, :, 0] += (dm_v - self.v_up[:-1] * dh_k) / h_r
-        w_k[:, :, 0] += (dm_w - self.w_up[:-1] * dh_k) / h_r
+        if normal_only:
+            un_r = (
+                self.u_up[:-1] * n_x[:-1]
+                + self.v_up[:-1] * n_y[:-1]
+                + self.w_up[:-1] * n_z[:-1]
+            )
+            dun = (scale * diss_un[:-1] - un_r * dh_k) / h_r
+            u_k[:, :, 0] += dun * n_x[:-1]
+            v_k[:, :, 0] += dun * n_y[:-1]
+            w_k[:, :, 0] += dun * n_z[:-1]
+        else:
+            dm_u = scale * diss_u[:-1]
+            dm_v = scale * diss_v[:-1]
+            dm_w = scale * diss_w[:-1]
+            u_k[:, :, 0] += (dm_u - self.u_up[:-1] * dh_k) / h_r
+            v_k[:, :, 0] += (dm_v - self.v_up[:-1] * dh_k) / h_r
+            w_k[:, :, 0] += (dm_w - self.w_up[:-1] * dh_k) / h_r
 
-        diss_u, diss_v, diss_w, diss_h = self._barth_dissipation_numpy(
-            self.u_left, self.v_left, self.w_left, self.h_left,
-            self.u_right, self.v_right, self.w_right, self.h_right,
-            0.5 * (self.xi_x_left + self.xi_x_right),
-            0.5 * (self.xi_y_left + self.xi_y_right),
-            0.5 * (self.xi_z_left + self.xi_z_right),
-            0.5 * (self.dxdeta_left + self.dxdeta_right),
-            0.5 * (self.dydeta_left + self.dydeta_right),
-            0.5 * (self.dzdeta_left + self.dzdeta_right),
-        )
+        if normal_only:
+            diss_un, diss_h, n_x, n_y, n_z = self._barth_dissipation_numpy(
+                self.u_left, self.v_left, self.w_left, self.h_left,
+                self.u_right, self.v_right, self.w_right, self.h_right,
+                0.5 * (self.xi_x_left + self.xi_x_right),
+                0.5 * (self.xi_y_left + self.xi_y_right),
+                0.5 * (self.xi_z_left + self.xi_z_right),
+                0.5 * (self.dxdeta_left + self.dxdeta_right),
+                0.5 * (self.dydeta_left + self.dydeta_right),
+                0.5 * (self.dzdeta_left + self.dzdeta_right),
+                normal_only=True,
+            )
+        else:
+            diss_u, diss_v, diss_w, diss_h = self._barth_dissipation_numpy(
+                self.u_left, self.v_left, self.w_left, self.h_left,
+                self.u_right, self.v_right, self.w_right, self.h_right,
+                0.5 * (self.xi_x_left + self.xi_x_right),
+                0.5 * (self.xi_y_left + self.xi_y_right),
+                0.5 * (self.xi_z_left + self.xi_z_right),
+                0.5 * (self.dxdeta_left + self.dxdeta_right),
+                0.5 * (self.dydeta_left + self.dydeta_right),
+                0.5 * (self.dzdeta_left + self.dzdeta_right),
+            )
 
         scale = 0.5 * self.horz_right_edge_factor
         dh_k = scale * diss_h[:, 1:]
-        dm_u = scale * diss_u[:, 1:]
-        dm_v = scale * diss_v[:, 1:]
-        dm_w = scale * diss_w[:, 1:]
         h_l = self.h_left[:, 1:]
         h_k[:, :, :, -1] += dh_k
-        u_k[:, :, :, -1] += (dm_u - self.u_left[:, 1:] * dh_k) / h_l
-        v_k[:, :, :, -1] += (dm_v - self.v_left[:, 1:] * dh_k) / h_l
-        w_k[:, :, :, -1] += (dm_w - self.w_left[:, 1:] * dh_k) / h_l
+        if normal_only:
+            un_l = (
+                self.u_left[:, 1:] * n_x[:, 1:]
+                + self.v_left[:, 1:] * n_y[:, 1:]
+                + self.w_left[:, 1:] * n_z[:, 1:]
+            )
+            dun = (scale * diss_un[:, 1:] - un_l * dh_k) / h_l
+            u_k[:, :, :, -1] += dun * n_x[:, 1:]
+            v_k[:, :, :, -1] += dun * n_y[:, 1:]
+            w_k[:, :, :, -1] += dun * n_z[:, 1:]
+        else:
+            dm_u = scale * diss_u[:, 1:]
+            dm_v = scale * diss_v[:, 1:]
+            dm_w = scale * diss_w[:, 1:]
+            u_k[:, :, :, -1] += (dm_u - self.u_left[:, 1:] * dh_k) / h_l
+            v_k[:, :, :, -1] += (dm_v - self.v_left[:, 1:] * dh_k) / h_l
+            w_k[:, :, :, -1] += (dm_w - self.w_left[:, 1:] * dh_k) / h_l
 
         scale = -0.5 * self.horz_left_edge_factor
         dh_k = scale * diss_h[:, :-1]
-        dm_u = scale * diss_u[:, :-1]
-        dm_v = scale * diss_v[:, :-1]
-        dm_w = scale * diss_w[:, :-1]
         h_r = self.h_right[:, :-1]
         h_k[:, :, :, 0] += dh_k
-        u_k[:, :, :, 0] += (dm_u - self.u_right[:, :-1] * dh_k) / h_r
-        v_k[:, :, :, 0] += (dm_v - self.v_right[:, :-1] * dh_k) / h_r
-        w_k[:, :, :, 0] += (dm_w - self.w_right[:, :-1] * dh_k) / h_r
+        if normal_only:
+            un_r = (
+                self.u_right[:, :-1] * n_x[:, :-1]
+                + self.v_right[:, :-1] * n_y[:, :-1]
+                + self.w_right[:, :-1] * n_z[:, :-1]
+            )
+            dun = (scale * diss_un[:, :-1] - un_r * dh_k) / h_r
+            u_k[:, :, :, 0] += dun * n_x[:, :-1]
+            v_k[:, :, :, 0] += dun * n_y[:, :-1]
+            w_k[:, :, :, 0] += dun * n_z[:, :-1]
+        else:
+            dm_u = scale * diss_u[:, :-1]
+            dm_v = scale * diss_v[:, :-1]
+            dm_w = scale * diss_w[:, :-1]
+            u_k[:, :, :, 0] += (dm_u - self.u_right[:, :-1] * dh_k) / h_r
+            v_k[:, :, :, 0] += (dm_v - self.v_right[:, :-1] * dh_k) / h_r
+            w_k[:, :, :, 0] += (dm_w - self.w_right[:, :-1] * dh_k) / h_r
 
     def _solve_numpy_lmars_kernel(self, u, v, w, h, t, dt, *, tangent_diss, verbose=False):
 

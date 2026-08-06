@@ -248,13 +248,14 @@ def test_numpy_and_numba_residuals_match_with_lmars(poly_order, grid, ah):
     ("poly_order", "grid"),
     [(1, 4), (3, 4)],
 )
-def test_numpy_and_numba_residuals_match_with_barth_diss(poly_order, grid):
+@pytest.mark.parametrize("flux_type", ["barth", "barth_normal_tangent"])
+def test_numpy_and_numba_residuals_match_with_barth_diss(poly_order, grid, flux_type):
     torch_solver, numpy_solver = _make_solvers(
         poly_order,
         grid,
         ah=0.5,
         a=0.5,
-        flux_type="barth",
+        flux_type=flux_type,
     )
     _, numpy_state = _set_random_state(
         torch_solver, numpy_solver, seed=5100 + 100 * poly_order + grid

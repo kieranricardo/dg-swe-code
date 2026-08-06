@@ -20,7 +20,7 @@ poly_order = 3
 a = 0.5
 
 h_diss = False
-flux_type = "lmars"
+flux_type = "barth_normal_tangent"
 
 if h_diss:
     ah = 0.5
@@ -41,6 +41,8 @@ def get_rw_fn_template(day=None):
         suffix = suffix + 'lmars'
     elif flux_type == "barth":
         suffix = suffix + 'barth'
+    elif flux_type == "barth_normal_tangent":
+        suffix = suffix + 'barth_normal_tangent'
     elif flux_type == "old_tangent":
         suffix = suffix + 'old_tangent_diss'
     elif flux_type == "standard_tangent":
@@ -67,6 +69,8 @@ def get_galewsky_fn_template(day=None):
         suffix = suffix + f'lmars'
     elif flux_type == "barth":
         suffix = suffix + f'barth'
+    elif flux_type == "barth_normal_tangent":
+        suffix = suffix + f'barth_normal_tangent'
 
     else:
         suffix = suffix + f'a_{a}'

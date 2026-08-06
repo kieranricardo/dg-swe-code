@@ -73,6 +73,8 @@ def get_fn_template(day=None):
         suffix = suffix + f'lmars'
     elif flux_type == "barth":
         suffix = suffix + f'barth'
+    elif flux_type == "barth_normal_tangent":
+        suffix = suffix + f'barth_normal_tangent'
     else:
         if flux_type == "old_tangent":
             suffix = suffix + 'old_tangent_diss'
