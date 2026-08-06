@@ -230,9 +230,9 @@ if mode == 'plot':
     vort_plot -= 2 * 7.292e-5 * np.sin(lat * np.pi / 180)
     h_plot = solver.evaluate_latlong(lat, lon, dict((name, face.h) for name, face in solver.faces.items()), degrees=True)
 
-    _plot_func_helper(vort_plot_siac, 'siac_vort', 'Relative vorticity (SIAC)', cmocean.cm.curl, vmin=-2.25e-5, vmax=2.25e-5)
-    _plot_func_helper(vort_plot, 'vort', 'Relative vorticity', cmocean.cm.curl, vmin=-2.25e-5, vmax=2.25e-5)
-    _plot_func_helper(h_plot, 'h', 'Height', cmocean.cm.deep)
+    # _plot_func_helper(vort_plot_siac, 'siac_vort', 'Relative vorticity (SIAC)', cmocean.cm.curl, vmin=-2.25e-5, vmax=2.25e-5)
+    # _plot_func_helper(vort_plot, 'vort', 'Relative vorticity', cmocean.cm.curl, vmin=-2.25e-5, vmax=2.25e-5)
+    # _plot_func_helper(h_plot, 'h', 'Height', cmocean.cm.deep)
 
     u_plot = solver.evaluate_latlong(lat, lon, dict((name, face.u) for name, face in solver.faces.items()), degrees=True)
     v_plot = solver.evaluate_latlong(lat, lon, dict((name, face.v) for name, face in solver.faces.items()), degrees=True)
@@ -250,9 +250,9 @@ if mode == 'plot':
     meridional_vel = lat_vec_x * u_plot + lat_vec_y * v_plot + lat_vec_z * w_plot
     speed = np.sqrt(zonal_vel**2 + meridional_vel**2)
 
-    _plot_func_helper(zonal_vel, 'zonal_vel', 'Zonal velocity', cmocean.cm.delta)
-    _plot_func_helper(meridional_vel, 'meridional_vel', 'Meridional velocity', cmocean.cm.delta)
-    _plot_func_helper(speed, 'speed', 'Speed', cmocean.cm.speed)
+    # _plot_func_helper(zonal_vel, 'zonal_vel', 'Zonal velocity', cmocean.cm.delta)
+    # _plot_func_helper(meridional_vel, 'meridional_vel', 'Meridional velocity', cmocean.cm.delta)
+    # _plot_func_helper(speed, 'speed', 'Speed', cmocean.cm.speed)
 
     print('Min h:', h_plot.min())
     print('Max vel:', speed.max())
@@ -260,19 +260,27 @@ if mode == 'plot':
     print('Max froude number:', froude_number.max())
     print('Max wave speed:', (speed + np.sqrt(g * h_plot)).max())
 
-    cmap = cmocean.cm.curl
-    vmin=-2.25e-5
-    vmax=2.25e-5
+    _plot_func_helper(froude_number, 'froude_number', 'Froude Number', cmocean.cm.speed, vmax=1.0)
+
+    def _polar_plot_func_helper(data, name, title, cmap, vmin=None, vmax=None):
+        plt.figure(figsize=(10, 5), dpi=400)
+        plt.title(title)
+        plt.tricontourf(solver.faces['zp'].xs.ravel(), solver.faces['zp'].ys.ravel(), data.ravel(), cmap=cmap, vmin=vmin, vmax=vmax, levels=100)
+        plt.xlabel('x (m)')
+        plt.ylabel('y (m)')
+        plt.colorbar()
+
+        plt.savefig(f'./{plot_dir}/{name}_polar_{fn_template}.png')
+
+
     vort_plot = solver.vorticity()['zp']
     vort_plot -= solver.faces['zp'].f
-    plt.figure(figsize=(10, 5), dpi=400)
-    plt.title('Relative vorticity')
-    plt.tricontourf(solver.faces['zp'].xs.ravel(), solver.faces['zp'].ys.ravel(), vort_plot.ravel(), cmap=cmap, vmin=vmin, vmax=vmax, levels=100)
-    plt.xlabel('x (m)')
-    plt.ylabel('y (m)')
-    plt.colorbar()
+    _polar_plot_func_helper(vort_plot, 'vort', 'Relative vorticity', cmocean.cm.curl, vmin=-2.25e-5, vmax=2.25e-5)
 
-    plt.savefig(f'./{plot_dir}/vort_polar_{fn_template}.png')
+    speed = np.sqrt(solver.faces['zp'].u**2 + solver.faces['zp'].v**2 + solver.faces['zp'].w**2)
+    froude_number = speed / np.sqrt(solver.faces['zp'].h * solver.faces['zp'].g)
+
+    _polar_plot_func_helper(froude_number, 'froude_number', 'Froude Number', 'nipy_spectral', vmax=1.0)
 
 
 
