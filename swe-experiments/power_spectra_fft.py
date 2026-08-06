@@ -20,7 +20,7 @@ poly_order = 3
 a = 0.5
 
 h_diss = False
-flux_type = "barth_normal_tangent"
+flux_type = "lmars"
 
 if h_diss:
     ah = 0.5
@@ -29,7 +29,7 @@ else:
 
 
 nx = ny = 32 + 1
-max_n = 400
+max_n = (poly_order + 1) * (nx - 1) * 4 // 2
 nlat = max(4 * max_n + 1, 2 * (ny - 1) * (poly_order + 1) + 1)
 nlon = max(8 * max_n + 2, 4 * (nx - 1) * (poly_order + 1) + 2)
 
