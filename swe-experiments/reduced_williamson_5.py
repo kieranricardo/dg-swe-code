@@ -21,7 +21,7 @@ else:
 
 cfl = 1.3
 h_diss = True
-flux_type = "barth"
+flux_type = "barth_normal_tangent"
 
 if h_diss:
     ah = 0.5
@@ -230,9 +230,9 @@ if mode == 'plot':
     vort_plot -= 2 * 7.292e-5 * np.sin(lat * np.pi / 180)
     h_plot = solver.evaluate_latlong(lat, lon, dict((name, face.h) for name, face in solver.faces.items()), degrees=True)
 
-    # _plot_func_helper(vort_plot_siac, 'siac_vort', 'Relative vorticity (SIAC)', cmocean.cm.curl, vmin=-2.25e-5, vmax=2.25e-5)
-    # _plot_func_helper(vort_plot, 'vort', 'Relative vorticity', cmocean.cm.curl, vmin=-2.25e-5, vmax=2.25e-5)
-    # _plot_func_helper(h_plot, 'h', 'Height', cmocean.cm.deep)
+    _plot_func_helper(vort_plot_siac, 'siac_vort', 'Relative vorticity (SIAC)', cmocean.cm.curl, vmin=-2.25e-5, vmax=2.25e-5)
+    _plot_func_helper(vort_plot, 'vort', 'Relative vorticity', cmocean.cm.curl, vmin=-2.25e-5, vmax=2.25e-5)
+    _plot_func_helper(h_plot, 'h', 'Height', cmocean.cm.deep)
 
     u_plot = solver.evaluate_latlong(lat, lon, dict((name, face.u) for name, face in solver.faces.items()), degrees=True)
     v_plot = solver.evaluate_latlong(lat, lon, dict((name, face.v) for name, face in solver.faces.items()), degrees=True)
@@ -250,9 +250,9 @@ if mode == 'plot':
     meridional_vel = lat_vec_x * u_plot + lat_vec_y * v_plot + lat_vec_z * w_plot
     speed = np.sqrt(zonal_vel**2 + meridional_vel**2)
 
-    # _plot_func_helper(zonal_vel, 'zonal_vel', 'Zonal velocity', cmocean.cm.delta)
-    # _plot_func_helper(meridional_vel, 'meridional_vel', 'Meridional velocity', cmocean.cm.delta)
-    # _plot_func_helper(speed, 'speed', 'Speed', cmocean.cm.speed)
+    _plot_func_helper(zonal_vel, 'zonal_vel', 'Zonal velocity', cmocean.cm.delta)
+    _plot_func_helper(meridional_vel, 'meridional_vel', 'Meridional velocity', cmocean.cm.delta)
+    _plot_func_helper(speed, 'speed', 'Speed', cmocean.cm.speed)
 
     print('Min h:', h_plot.min())
     print('Max vel:', speed.max())
