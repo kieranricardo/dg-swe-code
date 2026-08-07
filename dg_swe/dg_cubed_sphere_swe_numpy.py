@@ -1499,7 +1499,7 @@ if njit is not None:
                         + vv_down * eta_y_down[ey, ex, xi]
                         + ww_down * eta_z_down[ey, ex, xi]
                     )
-                    c_adv = 0.5 * (vel_up + vel_down) + np.sqrt(g * hh_down) - np.sqrt(g * hh_up)
+                    c_adv = 0.5 * (vel_up + vel_down) #+ np.sqrt(g * hh_down) - np.sqrt(g * hh_up)
 
                     nx_face = 0.5 * (eta_x_down[ey, ex, xi] + eta_x_up[ey, ex, xi])
                     ny_face = 0.5 * (eta_y_down[ey, ex, xi] + eta_y_up[ey, ex, xi])
@@ -1638,7 +1638,7 @@ if njit is not None:
                         + vv_left * xi_y_left[ey, ex, eta]
                         + ww_left * xi_z_left[ey, ex, eta]
                     )
-                    c_adv = 0.5 * (vel_right + vel_left) + np.sqrt(g * hh_left) - np.sqrt(g * hh_right)
+                    c_adv = 0.5 * (vel_right + vel_left) #+ np.sqrt(g * hh_left) - np.sqrt(g * hh_right)
 
                     nx_face = 0.5 * (xi_x_left[ey, ex, eta] + xi_x_right[ey, ex, eta])
                     ny_face = 0.5 * (xi_y_left[ey, ex, eta] + xi_y_right[ey, ex, eta])
@@ -4335,8 +4335,8 @@ class DGCubedSphereFaceNumpy:
         vel_down = h_down_flux / self.h_down
         vel_right = h_right_flux / self.h_right
         vel_left = h_left_flux / self.h_left
-        c_adv_vert = 0.5 * (vel_up + vel_down) + np.sqrt(self.g * self.h_down) - np.sqrt(self.g * self.h_up)
-        c_adv_horz = 0.5 * (vel_right + vel_left) + np.sqrt(self.g * self.h_left) - np.sqrt(self.g * self.h_right)
+        c_adv_vert = 0.5 * (vel_up + vel_down) #+ np.sqrt(self.g * self.h_down) - np.sqrt(self.g * self.h_up)
+        c_adv_horz = 0.5 * (vel_right + vel_left) #+ np.sqrt(self.g * self.h_left) - np.sqrt(self.g * self.h_right)
 
         u_cov_up = self.u_up * self.dxdxi_up + self.v_up * self.dydxi_up + self.w_up * self.dzdxi_up
         u_cov_down = self.u_down * self.dxdxi_down + self.v_down * self.dydxi_down + self.w_down * self.dzdxi_down
