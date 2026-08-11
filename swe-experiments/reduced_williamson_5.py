@@ -278,16 +278,32 @@ if mode == 'plot':
 
         plt.savefig(f'./{plot_dir}/{name}_{fn_template}.png')
 
-    vort_plot = solver.evaluate_latlong(lat, lon, solver.vorticity(), degrees=True)
+    vort_plot = solver.evaluate_latlong(lat, lon, solver.vorticity(continuous=True), degrees=True)
     vort_plot -= 2 * 7.292e-5 * np.sin(lat * np.pi / 180)
-    h_plot = solver.evaluate_latlong(lat, lon, dict((name, face.h) for name, face in solver.faces.items()), degrees=True)
+    h_plot = solver.evaluate_latlong(
+        lat, lon, 
+        solver.continuous_projection(dict((name, face.h) for name, face in solver.faces.items())), 
+        degrees=True
+    )
 
     _plot_func_helper(vort_plot, 'vort', 'Relative vorticity', cmocean.cm.curl, vmin=-2.25e-5, vmax=2.25e-5)
     _plot_func_helper(h_plot, 'h', 'Height', cmocean.cm.deep)
 
-    u_plot = solver.evaluate_latlong(lat, lon, dict((name, face.u) for name, face in solver.faces.items()), degrees=True)
-    v_plot = solver.evaluate_latlong(lat, lon, dict((name, face.v) for name, face in solver.faces.items()), degrees=True)
-    w_plot = solver.evaluate_latlong(lat, lon, dict((name, face.w) for name, face in solver.faces.items()), degrees=True)
+    u_plot = solver.evaluate_latlong(
+        lat, lon, 
+        solver.continuous_projection(dict((name, face.u) for name, face in solver.faces.items())), 
+        degrees=True
+    )
+    v_plot = solver.evaluate_latlong(
+        lat, lon, 
+        solver.continuous_projection(dict((name, face.v) for name, face in solver.faces.items())), 
+        degrees=True
+    )
+    w_plot = solver.evaluate_latlong(
+        lat, lon, 
+        solver.continuous_projection(dict((name, face.w) for name, face in solver.faces.items())), 
+        degrees=True
+    )
 
     long_vec_x = np.cos(lon * np.pi / 180)
     long_vec_y = np.sin(lon * np.pi / 180)
@@ -324,7 +340,7 @@ if mode == 'plot':
         plt.savefig(f'./{plot_dir}/{name}_polar_{fn_template}.png')
 
 
-    vort_plot = solver.vorticity()['zp']
+    vort_plot = solver.vorticity(continuous=True)['zp']
     vort_plot -= solver.faces['zp'].f
     _polar_plot_func_helper(vort_plot, 'vort', 'Relative vorticity', cmocean.cm.curl, vmin=-2.25e-5, vmax=2.25e-5)
 
