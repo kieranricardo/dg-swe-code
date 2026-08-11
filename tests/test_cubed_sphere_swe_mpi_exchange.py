@@ -82,22 +82,18 @@ def _external_boundaries(face):
         ("v_right", (slice(None), -1)),
         ("w_right", (slice(None), -1)),
         ("h_right", (slice(None), -1)),
-        ("vort_right", (slice(None), -1)),
         ("u_left", (slice(None), 0)),
         ("v_left", (slice(None), 0)),
         ("w_left", (slice(None), 0)),
         ("h_left", (slice(None), 0)),
-        ("vort_left", (slice(None), 0)),
         ("u_up", (-1,)),
         ("v_up", (-1,)),
         ("w_up", (-1,)),
         ("h_up", (-1,)),
-        ("vort_up", (-1,)),
         ("u_down", (0,)),
         ("v_down", (0,)),
         ("w_down", (0,)),
         ("h_down", (0,)),
-        ("vort_down", (0,)),
     ):
         yield attr, idx, getattr(face, attr)[idx]
 
@@ -138,10 +134,6 @@ def test_numpy_mpi_boundary_buffers_match_serial_exchange():
 
     serial_state = {name: _state(serial.faces[name]) for name in FACE_NAMES}
     serial.boundaries(serial_state)
-
-    for solver in parallel:
-        state = {solver.face_name: _state(solver.faces[solver.face_name])}
-        solver.set_vort(state)
 
     pending = []
     for solver in parallel:

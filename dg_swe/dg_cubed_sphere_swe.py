@@ -11,6 +11,7 @@ from dg_swe.numba_kernels import (
 )
 from dg_swe.utils import (
     cross_product,
+    continuous_element_projection,
     element_grid_coordinates,
     gll,
     lagrange1st,
@@ -129,7 +130,7 @@ class DGCubedSphereSWE:
         self.enstrophy_list = []
         self.mass_list = []
         self.vorticity_list = []
-        self.vorticity_diagnostic = False # calculates a continuous diagnostic vorticity for plotting
+        self.store_diagnostics = False
 
     @staticmethod
     def _get_comm(comm, nprocx, nprocy):
@@ -227,18 +228,10 @@ class DGCubedSphereSWE:
         else:
             raise ValueError
 
-    def set_vort(self, sol):
-        for name in self.active_face_names:
-            face = self.faces[name]
-            face.vort = face.dg_vort(*sol[name])
-
     def boundaries(self, sol=None):
 
         if sol is None:
             sol = {n: (self.faces[n].u, self.faces[n].v, self.faces[n].w, self.faces[n].h) for n in self.active_face_names}
-
-        if self.vorticity_diagnostic:
-            self.set_vort(sol)
 
         if self.parallel:
             reqs = self.fill_boundaries(sol)
@@ -254,21 +247,19 @@ class DGCubedSphereSWE:
 
                 neighbour = self.faces[n]
                 u, v, w, h = sol[n]
-                vort = neighbour.vort
                 self._assign_edge_state(face, i1, self._edge_state(neighbour, (u, v, w, h), i2))
 
     @staticmethod
     def _edge_state(face, state, side):
         u, v, w, h = state
-        vort = face.vort
         if side == 0:
-            data = (u[:, -1, :, -1], v[:, -1, :, -1], w[:, -1, :, -1], h[:, -1, :, -1], vort[:, -1, :, -1])
+            data = (u[:, -1, :, -1], v[:, -1, :, -1], w[:, -1, :, -1], h[:, -1, :, -1])
         elif side == 1:
-            data = (u[-1, :, -1], v[-1, :, -1], w[-1, :, -1], h[-1, :, -1], vort[-1, :, -1])
+            data = (u[-1, :, -1], v[-1, :, -1], w[-1, :, -1], h[-1, :, -1])
         elif side == 2:
-            data = (u[:, 0, :, 0], v[:, 0, :, 0], w[:, 0, :, 0], h[:, 0, :, 0], vort[:, 0, :, 0])
+            data = (u[:, 0, :, 0], v[:, 0, :, 0], w[:, 0, :, 0], h[:, 0, :, 0])
         elif side == 3:
-            data = (u[0, :, 0], v[0, :, 0], w[0, :, 0], h[0, :, 0], vort[0, :, 0])
+            data = (u[0, :, 0], v[0, :, 0], w[0, :, 0], h[0, :, 0])
         else:
             raise ValueError(f"Unknown boundary side {side}.")
         return np.ascontiguousarray(np.stack(data))
@@ -276,67 +267,58 @@ class DGCubedSphereSWE:
     @staticmethod
     def _pack_edge_state(face, state, side, out):
         u, v, w, h = state
-        vort = face.vort
         if side == 0:
             out[0] = u[:, -1, :, -1]
             out[1] = v[:, -1, :, -1]
             out[2] = w[:, -1, :, -1]
             out[3] = h[:, -1, :, -1]
-            out[4] = vort[:, -1, :, -1]
         elif side == 1:
             out[0] = u[-1, :, -1]
             out[1] = v[-1, :, -1]
             out[2] = w[-1, :, -1]
             out[3] = h[-1, :, -1]
-            out[4] = vort[-1, :, -1]
         elif side == 2:
             out[0] = u[:, 0, :, 0]
             out[1] = v[:, 0, :, 0]
             out[2] = w[:, 0, :, 0]
             out[3] = h[:, 0, :, 0]
-            out[4] = vort[:, 0, :, 0]
         elif side == 3:
             out[0] = u[0, :, 0]
             out[1] = v[0, :, 0]
             out[2] = w[0, :, 0]
             out[3] = h[0, :, 0]
-            out[4] = vort[0, :, 0]
         else:
             raise ValueError(f"Unknown boundary side {side}.")
 
     @staticmethod
     def _assign_edge_state(face, side, data):
-        u, v, w, h, vort = data
+        u, v, w, h = data
         if side == 0:
             face.u_right[:, -1] = u
             face.v_right[:, -1] = v
             face.w_right[:, -1] = w
             face.h_right[:, -1] = h
-            face.vort_right[:, -1] = vort
         elif side == 1:
             face.u_up[-1] = u
             face.v_up[-1] = v
             face.w_up[-1] = w
             face.h_up[-1] = h
-            face.vort_up[-1] = vort
         elif side == 2:
             face.u_left[:, 0] = u
             face.v_left[:, 0] = v
             face.w_left[:, 0] = w
             face.h_left[:, 0] = h
-            face.vort_left[:, 0] = vort
         elif side == 3:
             face.u_down[0] = u
             face.v_down[0] = v
             face.w_down[0] = w
             face.h_down[0] = h
-            face.vort_down[0] = vort
         else:
             raise ValueError(f"Unknown boundary side {side}.")
 
     def _init_mpi_boundary_exchange(self):
         face = self.faces[self.face_name]
-        nvars = 5
+        nvars = 4
         dtype = face.dtype
 
         self.right_boundary_x = np.zeros((nvars, face.ny, face.n), dtype=dtype)
@@ -451,7 +433,7 @@ class DGCubedSphereSWE:
 
     def time_step(self, dt=None, order=3, forcing=None):
 
-        if self.vorticity_diagnostic:
+        if self.store_diagnostics:
             self.time_list.append(self.time)
             self.energy_list.append(self.integrate(self.entropy()))
             self.enstrophy_list.append(self.integrate(self.enstrophy()))
@@ -584,6 +566,103 @@ class DGCubedSphereSWE:
             return coeffs
         return {
             name: coeffs[self.face_names.index(name)]
+            for name in self.active_face_names
+        }
+
+    @staticmethod
+    def _side_name(side):
+        names = {0: "right", 1: "up", 2: "left", 3: "down"}
+        try:
+            return names[side]
+        except KeyError as exc:
+            raise ValueError(f"Unknown boundary side {side}.") from exc
+
+    @staticmethod
+    def _edge_scalar_values(field, side):
+        if side == 0:
+            return np.ascontiguousarray(field[:, -1, :, -1])
+        if side == 1:
+            return np.ascontiguousarray(field[-1, :, -1])
+        if side == 2:
+            return np.ascontiguousarray(field[:, 0, :, 0])
+        if side == 3:
+            return np.ascontiguousarray(field[0, :, 0])
+        raise ValueError(f"Unknown boundary side {side}.")
+
+    def _current_state(self):
+        return {
+            name: (
+                self.faces[name].u,
+                self.faces[name].v,
+                self.faces[name].w,
+                self.faces[name].h,
+            )
+            for name in self.active_face_names
+        }
+
+    def _exchange_scalar_boundary_values(self, field):
+        face = self.faces[self.face_name]
+        recv = {
+            2: np.empty((face.ny, face.n), dtype=field.dtype),
+            0: np.empty((face.ny, face.n), dtype=field.dtype),
+            3: np.empty((face.nx, face.n), dtype=field.dtype),
+            1: np.empty((face.nx, face.n), dtype=field.dtype),
+        }
+        send = {
+            side: self._edge_scalar_values(field, side)
+            for side in recv
+        }
+        peers = {
+            2: self.prev_procx,
+            0: self.next_procx,
+            3: self.prev_procy,
+            1: self.next_procy,
+        }
+
+        reqs = []
+        for side, peer in peers.items():
+            if hasattr(self.comm, "Irecv"):
+                reqs.append((self.comm.Irecv(recv[side], source=peer), False))
+            else:
+                req = self.comm.Recv_init(recv[side], source=peer)
+                req.Start()
+                reqs.append((req, True))
+
+        for side, peer in peers.items():
+            if hasattr(self.comm, "Isend"):
+                reqs.append((self.comm.Isend(send[side], dest=peer), False))
+            else:
+                req = self.comm.Send_init(send[side], dest=peer)
+                req.Start()
+                reqs.append((req, True))
+
+        for req, is_persistent in reqs:
+            req.Wait()
+            if is_persistent and hasattr(req, "Free"):
+                req.Free()
+
+        return {self._side_name(side): values for side, values in recv.items()}
+
+    def _scalar_boundary_values(self, fields):
+        if self.parallel:
+            return {
+                self.face_name: self._exchange_scalar_boundary_values(fields[self.face_name])
+            }
+
+        out = {name: {} for name in self.active_face_names}
+        for name in self.active_face_names:
+            face = self.faces[name]
+            for neighbour_name, (side, neighbour_side) in face.connections:
+                out[name][self._side_name(side)] = self._edge_scalar_values(
+                    fields[neighbour_name], neighbour_side
+                )
+        return out
+
+    def continuous_projection(self, coeffs):
+        fields = self._coeffs_by_face(coeffs)
+        boundary_values = self._scalar_boundary_values(fields)
+        return {
+            name: self.faces[name].continuous_projection(fields[name], boundary_values[name])
             for name in self.active_face_names
         }
 
@@ -738,10 +817,29 @@ class DGCubedSphereSWE:
         return {n: f.entropy() for n, f in self.faces.items()}
 
     def enstrophy(self):
+        self.boundaries(self._current_state())
         return {n: f.enstrophy() for n, f in self.faces.items()}
 
-    def vorticity(self):
-        return {n: f.h * f.q(f.u, f.v, f.w, f.h) for n, f in self.faces.items()}
+    def vorticity(self, *, continuous=False):
+        self.boundaries(self._current_state())
+        vort = {n: f.vorticity() for n, f in self.faces.items()}
+        if continuous:
+            return self.continuous_projection(vort)
+        return vort
+
+    def q(self, *, continuous=False):
+        self.boundaries(self._current_state())
+        q = {n: f.q() for n, f in self.faces.items()}
+        if continuous:
+            return self.continuous_projection(q)
+        return q
+
+    def divergence(self, *, continuous=False):
+        self.boundaries(self._current_state())
+        div = {n: f.divergence() for n, f in self.faces.items()}
+        if continuous:
+            return self.continuous_projection(div)
+        return div
 
     def mass(self):
         return {n: f.h for n, f in self.faces.items()}
@@ -1271,8 +1369,6 @@ class DGCubedSphereFace:
         else:
             self.b = _to_numpy(b, dtype=self.dtype, copy=True)
 
-        self.vort = self.dg_vort(self.u, self.v, self.w, self.h)
-
         self.tmp1 = np.zeros_like(self.u)
         self.tmp2 = np.zeros_like(self.u)
 
@@ -1295,11 +1391,6 @@ class DGCubedSphereFace:
         self.h_right = np.zeros((self.ny, self.nx + 1, self.n), dtype=self.tmp1.dtype)
         self.h_up = np.zeros((self.ny + 1, self.nx, self.n), dtype=self.tmp1.dtype)
         self.h_down = np.zeros((self.ny + 1, self.nx, self.n), dtype=self.tmp1.dtype)
-
-        self.vort_left = np.zeros((self.ny, self.nx + 1, self.n), dtype=self.tmp1.dtype)
-        self.vort_right = np.zeros((self.ny, self.nx + 1, self.n), dtype=self.tmp1.dtype)
-        self.vort_up = np.zeros((self.ny + 1, self.nx, self.n), dtype=self.tmp1.dtype)
-        self.vort_down = np.zeros((self.ny + 1, self.nx, self.n), dtype=self.tmp1.dtype)
 
         self.boundaries(self.u, self.v, self.w, self.h, 0)
 
@@ -1385,14 +1476,28 @@ class DGCubedSphereFace:
         if h is None:
             h = self.h
 
-        u, v, _ = self.phys_to_cov(u, v, w)
-        vort = -(self.weak_ddxi(v) - self.weak_ddeta(u))
-        vort *= self.grad_zeta_norm
-        vort /= self.Jw
-        vort += self.f
-        return vort
+        self.boundaries(u, v, w, h, self.time)
 
-    def vorticity(self, u=None, v=None, w=None, h=None):
+        u_cov, v_cov, _ = self.phys_to_cov(u, v, w)
+        vort_cov = self.ddxi(v_cov) - self.ddeta(u_cov)
+
+        u_cov_up = self.u_up * self.dxdxi_up + self.v_up * self.dydxi_up + self.w_up * self.dzdxi_up
+        u_cov_down = self.u_down * self.dxdxi_down + self.v_down * self.dydxi_down + self.w_down * self.dzdxi_down
+        v_cov_right = self.u_right * self.dxdeta_right + self.v_right * self.dydeta_right + self.w_right * self.dzdeta_right
+        v_cov_left = self.u_left * self.dxdeta_left + self.v_left * self.dydeta_left + self.w_left * self.dzdeta_left
+
+        u_cov_vert = 0.5 * (u_cov_up + u_cov_down)
+        v_cov_horz = 0.5 * (v_cov_right + v_cov_left)
+        endpoint_weight = self.endpoint_weight
+
+        vort_cov[:, :, -1] -= (u_cov_vert[1:] - u_cov_down[1:]) / endpoint_weight
+        vort_cov[:, :, 0] += (u_cov_vert[:-1] - u_cov_up[:-1]) / endpoint_weight
+        vort_cov[:, :, :, -1] += (v_cov_horz[:, 1:] - v_cov_left[:, 1:]) / endpoint_weight
+        vort_cov[:, :, :, 0] -= (v_cov_horz[:, :-1] - v_cov_right[:, :-1]) / endpoint_weight
+
+        return vort_cov / self.J + self.f
+
+    def vorticity(self, u=None, v=None, w=None, h=None, *, continuous=False, boundary_values=None):
         if u is None:
             u = self.u
         if v is None:
@@ -1403,85 +1508,68 @@ class DGCubedSphereFace:
             h = self.h
 
         vort = self.dg_vort(u, v, w, h)
-
-        vort_sum = vort * self.Jw
-        h_sum = self.Jw.copy()
-
-        Jw = self.Jw
-
-        h_sum[0, :, 0] = h_sum[0, :, 0] + Jw[0, :, 0]
-        h_sum[-1, :, -1] = h_sum[-1, :, -1] + Jw[-1, :, -1]
-        h_sum[:, 0, :, 0] = h_sum[:, 0, :, 0] + Jw[:, 0, :, 0]
-        h_sum[:, -1, :, -1] = h_sum[:, -1, :, -1] + Jw[:, -1, :, -1]
-
-        vort_sum[0, :, 0] = vort_sum[0, :, 0] + self.vort_down[0] * Jw[0, :, 0]
-        vort_sum[-1, :, -1] = vort_sum[-1, :, -1] + self.vort_up[-1] * Jw[-1, :, -1]
-        vort_sum[:, 0, :, 0] = vort_sum[:, 0, :, 0] + self.vort_left[:, 0] * Jw[:, 0, :, 0]
-        vort_sum[:, -1, :, -1] = vort_sum[:, -1, :, -1] + self.vort_right[:, -1] * Jw[:, -1, :, -1]
-
-        for tnsr in [vort_sum, h_sum]:
-            tnsr[:, 1:, :, 0] = tnsr[:, 1:, :, 0] + tnsr[:, :-1, :, -1]
-            tnsr[:, :-1, :, -1] = tnsr[:, 1:, :, 0]
-
-            tnsr[1:, :, 0] = tnsr[1:, :, 0] + tnsr[:-1, :, -1]
-            tnsr[:-1, :, -1] = tnsr[1:, :, 0]
-
-            if self.xperiodic:
-                tnsr[:, 0, :, 0] = tnsr[:, 0, :, 0] + tnsr[:, -1, :, -1]
-                tnsr[:, -1, :, -1] = tnsr[:, 0, :, 0]
-
-            if self.yperiodic:
-                tnsr[0, :, 0] = tnsr[0, :, 0] + tnsr[-1, :, -1]
-                tnsr[-1, :, -1] = tnsr[0, :, 0]
-
-        vort = vort_sum / h_sum
-
+        if continuous:
+            return self.continuous_projection(vort, boundary_values=boundary_values)
         return vort
+
+    def dg_divergence(self, u=None, v=None, w=None, h=None):
+        if u is None:
+            u = self.u
+        if v is None:
+            v = self.v
+        if w is None:
+            w = self.w
+        if h is None:
+            h = self.h
+
+        self.boundaries(u, v, w, h, self.time)
+
+        u_contra, v_contra = self.phys_to_contra(u, v, w)
+        div = (self.ddxi(u_contra * self.J) + self.ddeta(v_contra * self.J)) / self.J
+
+        normal_up = self.u_up * self.eta_x_up + self.v_up * self.eta_y_up + self.w_up * self.eta_z_up
+        normal_down = self.u_down * self.eta_x_down + self.v_down * self.eta_y_down + self.w_down * self.eta_z_down
+        normal_right = self.u_right * self.xi_x_right + self.v_right * self.xi_y_right + self.w_right * self.xi_z_right
+        normal_left = self.u_left * self.xi_x_left + self.v_left * self.xi_y_left + self.w_left * self.xi_z_left
+
+        flux_vert = 0.5 * (normal_up + normal_down)
+        flux_horz = 0.5 * (normal_right + normal_left)
+
+        correction = np.zeros_like(div)
+        correction[:, :, -1] += (
+            (flux_vert[1:] - normal_down[1:]) * self.weights_x * self.J_vertface[:, :, -1]
+        )
+        correction[:, :, 0] -= (
+            (flux_vert[:-1] - normal_up[:-1]) * self.weights_x * self.J_vertface[:, :, 0]
+        )
+        correction[:, :, :, -1] += (
+            (flux_horz[:, 1:] - normal_left[:, 1:]) * self.weights_x * self.J_horzface[:, :, :, -1]
+        )
+        correction[:, :, :, 0] -= (
+            (flux_horz[:, :-1] - normal_right[:, :-1]) * self.weights_x * self.J_horzface[:, :, :, 0]
+        )
+
+        return div + correction / self.Jw
+
+    def divergence(self, u=None, v=None, w=None, h=None, *, continuous=False, boundary_values=None):
+        div = self.dg_divergence(u, v, w, h)
+        if continuous:
+            return self.continuous_projection(div, boundary_values=boundary_values)
+        return div
 
     def q(self, u=None, v=None, w=None, h=None):
-        if u is None:
-            u = self.u
-        if v is None:
-            v = self.v
-        if w is None:
-            w = self.w
         if h is None:
             h = self.h
+        return self.dg_vort(u, v, w, h) / h
 
-        vort = self.dg_vort(u, v, w, h)
-        vort_sum = vort * self.Jw
-        h_sum = h * self.Jw
-
-        Jw = self.Jw
-
-        h_sum[0, :, 0] = h_sum[0, :, 0] + self.h_down[0] * Jw[0, :, 0]
-        h_sum[-1, :, -1] = h_sum[-1, :, -1] + self.h_up[-1] * Jw[-1, :, -1]
-        h_sum[:, 0, :, 0] = h_sum[:, 0, :, 0] + self.h_left[:, 0] * Jw[:, 0, :, 0]
-        h_sum[:, -1, :, -1] = h_sum[:, -1, :, -1] + self.h_right[:, -1] * Jw[:, -1, :, -1]
-
-        vort_sum[0, :, 0] = vort_sum[0, :, 0] + self.vort_down[0] * Jw[0, :, 0]
-        vort_sum[-1, :, -1] = vort_sum[-1, :, -1] + self.vort_up[-1] * Jw[-1, :, -1]
-        vort_sum[:, 0, :, 0] = vort_sum[:, 0, :, 0] + self.vort_left[:, 0] * Jw[:, 0, :, 0]
-        vort_sum[:, -1, :, -1] = vort_sum[:, -1, :, -1] + self.vort_right[:, -1] * Jw[:, -1, :, -1]
-
-        for tnsr in [vort_sum, h_sum]:
-            tnsr[:, 1:, :, 0] = tnsr[:, 1:, :, 0] + tnsr[:, :-1, :, -1]
-            tnsr[:, :-1, :, -1] = tnsr[:, 1:, :, 0]
-
-            tnsr[1:, :, 0] = tnsr[1:, :, 0] + tnsr[:-1, :, -1]
-            tnsr[:-1, :, -1] = tnsr[1:, :, 0]
-
-            if self.xperiodic:
-                tnsr[:, 0, :, 0] = tnsr[:, 0, :, 0] + tnsr[:, -1, :, -1]
-                tnsr[:, -1, :, -1] = tnsr[:, 0, :, 0]
-
-            if self.yperiodic:
-                tnsr[0, :, 0] = tnsr[0, :, 0] + tnsr[-1, :, -1]
-                tnsr[-1, :, -1] = tnsr[0, :, 0]
-
-        q = vort_sum / h_sum
-
-        return q
+    def continuous_projection(self, field, boundary_values=None):
+        return continuous_element_projection(
+            field,
+            self.Jw,
+            boundary_values=boundary_values,
+            xperiodic=self.xperiodic,
+            yperiodic=self.yperiodic,
+        )
 
     def plot_solution(self, ax, vmin=None, vmax=None, plot_func=None, dim=3, cmap='nipy_spectral'):
         x_plot = self.xs.swapaxes(1, 2).reshape(self.h.shape[0] * self.h.shape[2], -1)

@@ -261,7 +261,7 @@ if mode == 'run':
 if mode == 'plot':
 
     fn_template = get_fn_template(day)
-    solver.vorticity_diagnostic = True
+    solver.store_diagnostics = True
     solver.load_restart(fn_template + '.npy', data_dir)
     plot_daily_diagnostics()
 

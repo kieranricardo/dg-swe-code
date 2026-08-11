@@ -459,6 +459,60 @@ def up_down_edge_arrays(arr, ny, nx, n, dtype=None):
     return up_arr, down_arr
 
 
+def continuous_element_projection(field, weights, boundary_values=None, xperiodic=False, yperiodic=False):
+    """
+    Project a nodal DG scalar field into the continuous H1 trace space.
+
+    The projection is the diagonal-mass version of the usual nodal averaging:
+    duplicate values at shared element nodes are averaged with their quadrature
+    weights. ``boundary_values`` may provide neighbouring traces for the four
+    outer face boundaries with keys ``"right"``, ``"up"``, ``"left"``, and
+    ``"down"``.
+    """
+    field = np.asarray(field)
+    weights = np.asarray(weights)
+    if field.shape != weights.shape:
+        raise ValueError(f"field and weights must have the same shape; got {field.shape} and {weights.shape}.")
+
+    boundary_values = {} if boundary_values is None else boundary_values
+    value_sum = field * weights
+    weight_sum = weights.copy()
+
+    if "down" in boundary_values:
+        value_sum[0, :, 0] += np.asarray(boundary_values["down"]) * weights[0, :, 0]
+        weight_sum[0, :, 0] += weights[0, :, 0]
+    if "up" in boundary_values:
+        value_sum[-1, :, -1] += np.asarray(boundary_values["up"]) * weights[-1, :, -1]
+        weight_sum[-1, :, -1] += weights[-1, :, -1]
+    if "left" in boundary_values:
+        value_sum[:, 0, :, 0] += np.asarray(boundary_values["left"]) * weights[:, 0, :, 0]
+        weight_sum[:, 0, :, 0] += weights[:, 0, :, 0]
+    if "right" in boundary_values:
+        value_sum[:, -1, :, -1] += np.asarray(boundary_values["right"]) * weights[:, -1, :, -1]
+        weight_sum[:, -1, :, -1] += weights[:, -1, :, -1]
+
+    for arr in (value_sum, weight_sum):
+        combined = arr[:, 1:, :, 0] + arr[:, :-1, :, -1]
+        arr[:, 1:, :, 0] = combined
+        arr[:, :-1, :, -1] = combined
+
+        combined = arr[1:, :, 0] + arr[:-1, :, -1]
+        arr[1:, :, 0] = combined
+        arr[:-1, :, -1] = combined
+
+        if xperiodic:
+            combined = arr[:, 0, :, 0] + arr[:, -1, :, -1]
+            arr[:, 0, :, 0] = combined
+            arr[:, -1, :, -1] = combined
+
+        if yperiodic:
+            combined = arr[0, :, 0] + arr[-1, :, -1]
+            arr[0, :, 0] = combined
+            arr[-1, :, -1] = combined
+
+    return value_sum / weight_sum
+
+
 class Interpolate:
 
     def __init__(self, p1, p2):

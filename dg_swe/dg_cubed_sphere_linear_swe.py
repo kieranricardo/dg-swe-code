@@ -1,5 +1,6 @@
 import numpy as np
 from dg_swe.utils import (
+    continuous_element_projection,
     cross_product,
     element_grid_coordinates,
     gll,
@@ -39,20 +40,11 @@ class DGCubedSphereLinearSWE:
         self.enstrophy_list = []
         self.mass_list = []
         self.vorticity_list = []
-        self.H1 = True # calculates a continuous diagnostic vorticity for plotting
-
-    def set_vort(self, sol):
-        for name in self.face_names:
-            face = self.faces[name]
-            face.vort = face.dg_vort(*sol[name])
 
     def boundaries(self, sol=None):
 
         if sol is None:
             sol = {n: (self.faces[n].u, self.faces[n].v, self.faces[n].w, self.faces[n].h) for n in self.face_names}
-
-        if self.H1:
-            self.set_vort(sol)
 
         for name in self.face_names:
 
@@ -63,31 +55,26 @@ class DGCubedSphereLinearSWE:
 
                 neighbour = self.faces[n]
                 u, v, w, h = sol[n]
-                vort = neighbour.vort
                 if i2 == 0:
                     u = u[:, -1, :, -1]
                     v = v[:, -1, :, -1]
                     w = w[:, -1, :, -1]
                     h = h[:, -1, :, -1]
-                    vort = vort[:, -1, :, -1]
                 elif i2 == 1:
                     u = u[-1, :, -1]
                     v = v[-1, :, -1]
                     w = w[-1, :, -1]
                     h = h[-1, :, -1]
-                    vort = vort[-1, :, -1]
                 elif i2 == 2:
                     u = u[:, 0, :, 0]
                     v = v[:, 0, :, 0]
                     w = w[:, 0, :, 0]
                     h = h[:, 0, :, 0]
-                    vort = vort[:, 0, :, 0]
                 elif i2 == 3:
                     u = u[0, :, 0]
                     v = v[0, :, 0]
                     w = w[0, :, 0]
                     h = h[0, :, 0]
-                    vort = vort[0, :, 0]
                 else:
                     raise RuntimeError
 
@@ -97,26 +84,22 @@ class DGCubedSphereLinearSWE:
                     face.v_right[:, -1] = v
                     face.w_right[:, -1] = w
                     face.h_right[:, -1] = h
-                    face.vort_right[:, -1] = vort
                 elif i1 == 1:
                     face.u_up[-1] = u
                     face.v_up[-1] = v
                     face.w_up[-1] = w
                     face.h_up[-1] = h
-                    face.vort_up[-1] = vort
                 elif i1 == 2:
                     # 2 - case of left element boundary. therefore fill array for right of element
                     face.u_left[:, 0] = u
                     face.v_left[:, 0] = v
                     face.w_left[:, 0] = w
                     face.h_left[:, 0] = h
-                    face.vort_left[:, 0] = vort
                 elif i1 == 3:
                     face.u_down[0] = u
                     face.v_down[0] = v
                     face.w_down[0] = w
                     face.h_down[0] = h
-                    face.vort_down[0] = vort
                 else:
                     raise RuntimeError
 
@@ -654,8 +637,6 @@ class DGCubedSphereFace:
         else:
             self.b = to_numpy(b, dtype=self.dtype, copy=True)
 
-        self.vort = self.dg_vort(self.u, self.v, self.w, self.h)
-
         self.tmp1 = np.zeros_like(self.u)
         self.tmp2 = np.zeros_like(self.u)
 
@@ -681,11 +662,6 @@ class DGCubedSphereFace:
         self.h_right = np.zeros(edge_lr_shape, dtype=self.tmp1.dtype)
         self.h_up = np.zeros(edge_ud_shape, dtype=self.tmp1.dtype)
         self.h_down = np.zeros(edge_ud_shape, dtype=self.tmp1.dtype)
-
-        self.vort_left = np.zeros(edge_lr_shape, dtype=self.tmp1.dtype)
-        self.vort_right = np.zeros(edge_lr_shape, dtype=self.tmp1.dtype)
-        self.vort_up = np.zeros(edge_ud_shape, dtype=self.tmp1.dtype)
-        self.vort_down = np.zeros(edge_ud_shape, dtype=self.tmp1.dtype)
 
         self.boundaries(self.u, self.v, self.w, self.h, 0)
 
@@ -759,40 +735,7 @@ class DGCubedSphereFace:
         if h is None:
             h = self.h
 
-        vort = self.dg_vort(u, v, w, h)
-        vort_sum = np.zeros_like(vort) + vort * self.J * self.weights
-        h_sum = np.zeros_like(h) + h * self.J * self.weights
-
-        Jw = self.J * self.weights
-
-        h_sum[0, :, 0] = h_sum[0, :, 0] + self.h_down[0] * Jw[0, :, 0]
-        h_sum[-1, :, -1] = h_sum[-1, :, -1] + self.h_up[-1] * Jw[-1, :, -1]
-        h_sum[:, 0, :, 0] = h_sum[:, 0, :, 0] + self.h_left[:, 0] * Jw[:, 0, :, 0]
-        h_sum[:, -1, :, -1] = h_sum[:, -1, :, -1] + self.h_right[:, -1] * Jw[:, -1, :, -1]
-
-        vort_sum[0, :, 0] = vort_sum[0, :, 0] + self.vort_down[0] * Jw[0, :, 0]
-        vort_sum[-1, :, -1] = vort_sum[-1, :, -1] + self.vort_up[-1] * Jw[-1, :, -1]
-        vort_sum[:, 0, :, 0] = vort_sum[:, 0, :, 0] + self.vort_left[:, 0] * Jw[:, 0, :, 0]
-        vort_sum[:, -1, :, -1] = vort_sum[:, -1, :, -1] + self.vort_right[:, -1] * Jw[:, -1, :, -1]
-
-        for tnsr in [vort_sum, h_sum]:
-            tnsr[:, 1:, :, 0] = tnsr[:, 1:, :, 0] + tnsr[:, :-1, :, -1]
-            tnsr[:, :-1, :, -1] = tnsr[:, 1:, :, 0]
-
-            tnsr[1:, :, 0] = tnsr[1:, :, 0] + tnsr[:-1, :, -1]
-            tnsr[:-1, :, -1] = tnsr[1:, :, 0]
-
-            if self.xperiodic:
-                tnsr[:, 0, :, 0] = tnsr[:, 0, :, 0] + tnsr[:, -1, :, -1]
-                tnsr[:, -1, :, -1] = tnsr[:, 0, :, 0]
-
-            if self.yperiodic:
-                tnsr[0, :, 0] = tnsr[0, :, 0] + tnsr[-1, :, -1]
-                tnsr[-1, :, -1] = tnsr[0, :, 0]
-
-        q = vort_sum / h_sum
-
-        return q
+        return self.dg_vort(u, v, w, h) / h
 
     def plot_solution(self, ax, vmin=None, vmax=None, plot_func=None, dim=3, cmap='nipy_spectral'):
         x_plot = self.xs.swapaxes(1, 2).reshape(self.h.shape[0] * self.h.shape[2], -1)
@@ -1017,37 +960,21 @@ class DGCubedSphereFace:
         return u, v, w
 
     def h_plot(self):
+        return self.continuous_projection(
+            self.h,
+            boundary_values={
+                "down": self.h_down[0],
+                "up": self.h_up[-1],
+                "left": self.h_left[:, 0],
+                "right": self.h_right[:, -1],
+            },
+        )
 
-        vort_sum = 0.0 + self.h * self.J * self.weights
-        h_sum = self.J * self.weights
-
-        Jw = self.J * self.weights
-
-        h_sum[0, :, 0] = h_sum[0, :, 0] + Jw[0, :, 0]
-        h_sum[-1, :, -1] = h_sum[-1, :, -1] + Jw[-1, :, -1]
-        h_sum[:, 0, :, 0] = h_sum[:, 0, :, 0] + Jw[:, 0, :, 0]
-        h_sum[:, -1, :, -1] = h_sum[:, -1, :, -1] + Jw[:, -1, :, -1]
-
-        vort_sum[0, :, 0] = vort_sum[0, :, 0] + self.h_down[0] * Jw[0, :, 0]
-        vort_sum[-1, :, -1] = vort_sum[-1, :, -1] + self.h_up[-1] * Jw[-1, :, -1]
-        vort_sum[:, 0, :, 0] = vort_sum[:, 0, :, 0] + self.h_left[:, 0] * Jw[:, 0, :, 0]
-        vort_sum[:, -1, :, -1] = vort_sum[:, -1, :, -1] + self.h_right[:, -1] * Jw[:, -1, :, -1]
-
-        for tnsr in [vort_sum, h_sum]:
-            tnsr[:, 1:, :, 0] = tnsr[:, 1:, :, 0] + tnsr[:, :-1, :, -1]
-            tnsr[:, :-1, :, -1] = tnsr[:, 1:, :, 0]
-
-            tnsr[1:, :, 0] = tnsr[1:, :, 0] + tnsr[:-1, :, -1]
-            tnsr[:-1, :, -1] = tnsr[1:, :, 0]
-
-            if self.xperiodic:
-                tnsr[:, 0, :, 0] = tnsr[:, 0, :, 0] + tnsr[:, -1, :, -1]
-                tnsr[:, -1, :, -1] = tnsr[:, 0, :, 0]
-
-            if self.yperiodic:
-                tnsr[0, :, 0] = tnsr[0, :, 0] + tnsr[-1, :, -1]
-                tnsr[-1, :, -1] = tnsr[0, :, 0]
-
-        vort = vort_sum / h_sum
-
-        return vort
+    def continuous_projection(self, field, boundary_values=None):
+        return continuous_element_projection(
+            field,
+            self.J * self.weights,
+            boundary_values=boundary_values,
+            xperiodic=self.xperiodic,
+            yperiodic=self.yperiodic,
+        )
