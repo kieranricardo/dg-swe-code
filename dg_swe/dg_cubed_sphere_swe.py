@@ -722,7 +722,17 @@ class DGCubedSphereSWE:
         return [out]
 
     def integrate(self, q):
-        return sum(f.integrate(q[n]) for n, f in self.faces.items())
+        local_total = sum(f.integrate(q[n]) for n, f in self.faces.items())
+        if not self.parallel:
+            return local_total
+
+        if hasattr(self.comm, "reduce"):
+            return self.comm.reduce(local_total, root=0)
+
+        gathered = self.comm.gather(local_total, root=0)
+        if self.rank == 0:
+            return sum(gathered)
+        return None
 
     def entropy(self):
         return {n: f.entropy() for n, f in self.faces.items()}
@@ -857,6 +867,9 @@ class DGCubedSphereSWE:
         self.boundaries()
 
     def save_diagnostics(self, fn_template, directory):
+        if self.parallel and self.rank != 0:
+            return
+
         diagnostics = np.stack([self.time_list, self.energy_list, self.enstrophy_list, self.vorticity_list, self.mass_list])
         fp = os.path.join(directory, f"diagnostics_{fn_template}")
         np.save(fp, diagnostics)

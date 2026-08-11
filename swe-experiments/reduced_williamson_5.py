@@ -160,6 +160,54 @@ def plot_orography(idx):
     plt.savefig(f'./plots/williamson_5_orography.png')
 
 
+def daily_diagnostics_fp():
+    return os.path.join(data_dir, f"daily_diagnostics_{get_fn_template()}.npy")
+
+
+def collect_daily_diagnostics(solver, day):
+    energy = solver.integrate(solver.entropy())
+    enstrophy = solver.integrate(solver.enstrophy())
+    if rank != 0:
+        return None
+    return [float(day), float(energy), float(enstrophy)]
+
+
+def save_daily_diagnostics(rows):
+    if rank != 0:
+        return
+    np.save(daily_diagnostics_fp(), np.asarray(rows, dtype=np.float64))
+
+
+def load_daily_diagnostics():
+    return np.load(daily_diagnostics_fp())
+
+
+def plot_daily_diagnostics():
+    if rank != 0:
+        return
+
+    fp = daily_diagnostics_fp()
+    if not os.path.exists(fp):
+        print("No daily diagnostics found:", fp)
+        return
+
+    diagnostics = load_daily_diagnostics()
+    days = diagnostics[:, 0]
+    energy = diagnostics[:, 1]
+    enstrophy = diagnostics[:, 2]
+
+    plt.figure(figsize=(7, 4), dpi=400)
+    plt.plot(days, (energy - energy[0]) / energy[0], label="Energy")
+    plt.plot(days, (enstrophy - enstrophy[0]) / enstrophy[0], label="Enstrophy")
+    plt.xlabel("Time (days)")
+    plt.ylabel("Relative error")
+    plt.yscale("symlog", linthresh=1.0e-15)
+    plt.grid(True, which="both")
+    plt.legend()
+    plt.tight_layout()
+    plt.savefig(os.path.join(plot_dir, f"daily_diagnostics_{get_fn_template()}.png"))
+
+
 solver = DGCubedSphereSWE(
     poly_order, nx, ny, g, f,
     eps=0.0, a=0.5, ah=ah, radius=radius,
@@ -175,6 +223,11 @@ if rank == 0:
     print('Initial dt:', dt)
 
 if mode == 'run':
+    daily_diagnostics = []
+    initial_diagnostics = collect_daily_diagnostics(solver, 0)
+    if rank == 0:
+        daily_diagnostics.append(initial_diagnostics)
+
     t0 = time.time()
     for i in range(day):
         if rank == 0:
@@ -188,6 +241,10 @@ if mode == 'run':
         while solver.time < tend:
             solver.time_step(dt=min(dt, tend - solver.time), order=34)
 
+        day_diagnostics = collect_daily_diagnostics(solver, i + 1)
+        if rank == 0:
+            daily_diagnostics.append(day_diagnostics)
+
         if ((i + 1) % n_save == 0):
             fn_template = get_fn_template(i + 1)
             if rank == 0:
@@ -199,12 +256,14 @@ if mode == 'run':
             t0 = time.time()
     # if rank == 0:
     #     print('Wall time for 1 day:', (t1 - t0) / 20, '\n')
+    save_daily_diagnostics(daily_diagnostics)
 
 if mode == 'plot':
 
     fn_template = get_fn_template(day)
     solver.vorticity_diagnostic = True
     solver.load_restart(fn_template + '.npy', data_dir)
+    plot_daily_diagnostics()
 
     lat = np.linspace(-90, 90, 4 * 512)[:, None]
     lon = np.linspace(-180, 180, 4 * 1024)[None, :]
@@ -284,6 +343,20 @@ if mode == 'restart':
         print('Loading:', fn_template)
     solver.load_restart(fn_template + '.npy', data_dir)
 
+    daily_diagnostics = []
+    if rank == 0 and os.path.exists(daily_diagnostics_fp()):
+        existing_diagnostics = load_daily_diagnostics()
+        daily_diagnostics = existing_diagnostics[
+            existing_diagnostics[:, 0] <= i_start
+        ].tolist()
+
+    restart_diagnostics = collect_daily_diagnostics(solver, i_start)
+    if rank == 0 and (
+        len(daily_diagnostics) == 0
+        or daily_diagnostics[-1][0] != i_start
+    ):
+        daily_diagnostics.append(restart_diagnostics)
+
     for i in range(i_start, 3600):
         if rank == 0:
             print('\nRunning day', i + 1)
@@ -295,6 +368,10 @@ if mode == 'restart':
         while solver.time < tend:
             solver.time_step(dt=min(dt, tend - solver.time), order=34)
 
+        day_diagnostics = collect_daily_diagnostics(solver, i + 1)
+        if rank == 0:
+            daily_diagnostics.append(day_diagnostics)
+
         if ((i + 1) % n_save == 0):
             fn_template = get_fn_template(i + 1)
             if rank == 0:
@@ -302,6 +379,8 @@ if mode == 'restart':
             solver.save_restart(fn_template, data_dir)
         # fn_template = f"reduced_williamson_5_day_{i + 1}.npy"
         # solver.save_restart(fn_template, 'data')
+
+    save_daily_diagnostics(daily_diagnostics)
 
 if mode == 'process-data':
 

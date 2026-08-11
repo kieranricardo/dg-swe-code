@@ -158,6 +158,51 @@ def test_numpy_mpi_boundary_buffers_match_serial_exchange():
             np.testing.assert_array_equal(getattr(parallel_face, attr)[idx], reference)
 
 
+def test_numpy_mpi_integrate_returns_global_value_on_root():
+    solver_kwargs = dict(
+        poly_order=1,
+        nx=4,
+        ny=4,
+        g=9.81,
+        f=1.0e-4,
+        eps=0.1,
+        radius=1.0,
+        dtype=np.float64,
+    )
+    mailbox = {}
+    solvers = [
+        DGCubedSphereSWE(
+            **solver_kwargs,
+            nprocx=1,
+            nprocy=1,
+            comm=_FakeComm(rank, len(FACE_NAMES), mailbox),
+        )
+        for rank in range(len(FACE_NAMES))
+    ]
+
+    fields = []
+    expected = 0.0
+    for solver in solvers:
+        face = solver.faces[solver.face_name]
+        field = {
+            solver.face_name: np.full(
+                face.J.shape,
+                FACE_NAMES.index(solver.face_name) + 1.0,
+                dtype=face.dtype,
+            )
+        }
+        fields.append(field)
+        expected += face.integrate(field[solver.face_name])
+
+    results = [None] * len(solvers)
+    for rank in range(1, len(solvers)):
+        results[rank] = solvers[rank].integrate(fields[rank])
+    results[0] = solvers[0].integrate(fields[0])
+
+    assert results[1:] == [None] * (len(solvers) - 1)
+    np.testing.assert_allclose(results[0], expected)
+
+
 def test_numpy_mpi_face_setup_receives_local_subtile_sizes(monkeypatch):
     calls = []
     original_face_class = swe.DGCubedSphereFace
