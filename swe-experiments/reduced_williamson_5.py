@@ -1,7 +1,7 @@
 from matplotlib import pyplot as plt
 import numpy as np
 from scipy.stats import linregress
-from dg_swe.dg_cubed_sphere_swe_numpy import DGCubedSphereSWENumpy
+from dg_swe.dg_cubed_sphere_swe import DGCubedSphereSWE
 import os
 import time
 from mpi4py import MPI
@@ -160,7 +160,7 @@ def plot_orography(idx):
     plt.savefig(f'./plots/williamson_5_orography.png')
 
 
-solver = DGCubedSphereSWENumpy(
+solver = DGCubedSphereSWE(
     poly_order, nx, ny, g, f,
     eps=0.0, a=0.5, ah=ah, radius=radius,
     dtype=np.float64, flux_type=flux_type,
@@ -205,12 +205,6 @@ if mode == 'plot':
     fn_template = get_fn_template(day)
     solver.vorticity_diagnostic = True
     solver.load_restart(fn_template + '.npy', data_dir)
-    rel_vort_siac = solver.siac_vorticity(
-        include_coriolis=False, 
-        boundary='sphere',
-        quadrature_order=10,
-        scale=0.75,
-    )
 
     lat = np.linspace(-90, 90, 4 * 512)[:, None]
     lon = np.linspace(-180, 180, 4 * 1024)[None, :]
@@ -225,12 +219,10 @@ if mode == 'plot':
 
         plt.savefig(f'./{plot_dir}/{name}_{fn_template}.png')
 
-    vort_plot_siac = solver.evaluate_latlong(lat, lon, rel_vort_siac, degrees=True)
     vort_plot = solver.evaluate_latlong(lat, lon, solver.vorticity(), degrees=True)
     vort_plot -= 2 * 7.292e-5 * np.sin(lat * np.pi / 180)
     h_plot = solver.evaluate_latlong(lat, lon, dict((name, face.h) for name, face in solver.faces.items()), degrees=True)
 
-    _plot_func_helper(vort_plot_siac, 'siac_vort', 'Relative vorticity (SIAC)', cmocean.cm.curl, vmin=-2.25e-5, vmax=2.25e-5)
     _plot_func_helper(vort_plot, 'vort', 'Relative vorticity', cmocean.cm.curl, vmin=-2.25e-5, vmax=2.25e-5)
     _plot_func_helper(h_plot, 'h', 'Height', cmocean.cm.deep)
 

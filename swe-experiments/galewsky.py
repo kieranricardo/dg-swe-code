@@ -1,5 +1,5 @@
 from matplotlib import pyplot as plt
-from dg_swe.dg_cubed_sphere_swe_numpy import DGCubedSphereSWENumpy
+from dg_swe.dg_cubed_sphere_swe import DGCubedSphereSWE
 import numpy as np
 import scipy
 import os
@@ -145,7 +145,7 @@ if mode == 'run':
             if not os.path.exists(plot_dir): os.makedirs(plot_dir)
 
         
-        solver = DGCubedSphereSWENumpy(
+        solver = DGCubedSphereSWE(
             poly_order, nx, ny, g, f,
             eps, a=a, radius=radius,
             dtype=np.float64, flux_type=flux_type, ah=ah,
@@ -185,7 +185,7 @@ if mode == 'run':
 
 elif mode == 'plot':
 
-    solver = DGCubedSphereSWENumpy(
+    solver = DGCubedSphereSWE(
         poly_order, nx, ny, g, f,
         eps, solution=None, a=0.5, radius=radius,
         dtype=np.float64, damping='adaptive'
@@ -215,18 +215,10 @@ elif mode == 'plot':
 
             plt.savefig(f'./{plot_dir}/{name}_{fn_template}.png')
 
-        rel_vort_siac = solver.siac_vorticity(
-            include_coriolis=False, 
-            boundary='sphere',
-            quadrature_order=10,
-            scale=0.75,
-        )
-        vort_plot_siac = solver.evaluate_latlong(lat, lon, rel_vort_siac, degrees=True)
         vort_plot = solver.evaluate_latlong(lat, lon, solver.vorticity(), degrees=True)
         vort_plot -= 2 * 7.292e-5 * np.sin(lat * np.pi / 180)
         h_plot = solver.evaluate_latlong(lat, lon, dict((name, face.h) for name, face in solver.faces.items()), degrees=True)
 
-        _plot_func_helper(vort_plot_siac, 'siac_vort', 'Relative vorticity (SIAC)', cmocean.cm.curl, vmin=None, vmax=None)
         _plot_func_helper(vort_plot, 'vort', 'Relative vorticity', cmocean.cm.curl, vmin=None, vmax=None)
         
         _plot_func_helper(h_plot, 'h', 'Height', cmocean.cm.deep)

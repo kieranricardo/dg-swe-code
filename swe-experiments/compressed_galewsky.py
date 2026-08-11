@@ -1,5 +1,5 @@
 from matplotlib import pyplot as plt
-from dg_swe.dg_cubed_sphere_swe_numpy import DGCubedSphereSWENumpy
+from dg_swe.dg_cubed_sphere_swe import DGCubedSphereSWE
 import numpy as np
 import scipy
 import os
@@ -150,7 +150,7 @@ if mode == 'run':
             if not os.path.exists(plot_dir): os.makedirs(plot_dir)
 
         
-        solver = DGCubedSphereSWENumpy(
+        solver = DGCubedSphereSWE(
             poly_order, nx, ny, g, f,
             eps, a=a, radius=radius,
             dtype=np.float64, flux_type=flux_type, ah=ah,
@@ -198,7 +198,7 @@ if mode == 'run':
 
 elif mode == 'plot':
 
-    solver = DGCubedSphereSWENumpy(
+    solver = DGCubedSphereSWE(
         poly_order, nx, ny, g, f,
         eps, solution=None, a=0.5, radius=radius,
         dtype=np.float64, damping='adaptive'
@@ -229,12 +229,6 @@ elif mode == 'plot':
 
             plt.savefig(f'./{plot_dir}/{name}_{fn_template}.png')
 
-        rel_vort_siac = solver.siac_vorticity(
-            include_coriolis=False, 
-            boundary='sphere',
-            quadrature_order=10,
-            scale=0.75,
-        )
         vort_plot = solver.vorticity()['zp']
         vort_plot -= solver.faces['zp'].f
         h_plot = solver.faces['zp'].h

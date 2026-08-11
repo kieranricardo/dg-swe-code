@@ -1,7 +1,17 @@
 import numpy as np
 from matplotlib import pyplot as plt
-import torch
 from scipy.interpolate import lagrange as lagrange_poly
+
+
+def to_numpy(arr, dtype=None, copy=False):
+    if hasattr(arr, "detach"):
+        arr = arr.detach().cpu().numpy()
+    out = np.asarray(arr)
+    if dtype is not None and out.dtype != np.dtype(dtype):
+        return out.astype(dtype, copy=copy)
+    if copy:
+        return out.copy()
+    return out
 
 
 def gll(N, iterative=False):
@@ -325,8 +335,6 @@ def analyze_conserved_quantities(solver, tend, label, dt=None):
 
         # q = solver.continuous_q()
         # q2 = q ** 2
-        # dq2dx = torch.einsum('fgcd,abcd->fgab', q2, self.grad[..., 1])
-        # dq2dy = torch.einsum('fgcd,abcd->fgab', q2, self.grad[..., 0])
         # int_1 = 2 * solver.integrate(dqdx * q * (u * h) + dqdy * q * (v * h))
         # int_2 = solver.integrate(dq2dx * (u * h) + dq2dy * (v * h))
         # chain_rule_error = (int_1 - int_2)
@@ -399,8 +407,56 @@ def dot_product(vec1, vec2):
 
 
 def norm_L2(vec):
-    out = torch.sqrt(sum(a ** 2 for a in vec))
+    out = np.sqrt(sum(a ** 2 for a in vec))
     return out
+
+
+def element_grid_coordinates(xs, ys, xs_1d, y_1d):
+    xs = np.asarray(xs)
+    ys = np.asarray(ys)
+    xs_1d = np.asarray(xs_1d)
+    y_1d = np.asarray(y_1d)
+
+    lx = np.mean(np.diff(xs))
+    ly = np.mean(np.diff(ys))
+
+    x1, y1 = np.meshgrid(xs_1d, y_1d)
+    x1 = (1 + x1) * lx / 2
+    y1 = (1 + y1) * ly / 2
+
+    shape = (len(ys) - 1, len(xs) - 1)
+    x1 = x1[None, None, ...] + xs[:-1][None, :, None, None] * np.ones(shape + (1, 1))
+    y1 = y1[None, None, ...] + ys[:-1][:, None, None, None] * np.ones(shape + (1, 1))
+
+    return x1, y1, lx, ly
+
+
+def left_right_edge_arrays(arr, ny, nx, n, dtype=None):
+    dtype = arr.dtype if dtype is None else dtype
+    right_arr = np.zeros((ny, nx + 1, n), dtype=dtype)
+    left_arr = np.zeros((ny, nx + 1, n), dtype=dtype)
+
+    right_arr[:, :-1] = arr[:, :, :, 0]
+    right_arr[:, -1] = arr[:, -1, :, -1]
+
+    left_arr[:, 1:] = arr[:, :, :, -1]
+    left_arr[:, 0] = arr[:, 0, :, 0]
+
+    return right_arr, left_arr
+
+
+def up_down_edge_arrays(arr, ny, nx, n, dtype=None):
+    dtype = arr.dtype if dtype is None else dtype
+    up_arr = np.zeros((ny + 1, nx, n), dtype=dtype)
+    down_arr = np.zeros((ny + 1, nx, n), dtype=dtype)
+
+    up_arr[:-1] = arr[:, :, 0, :]
+    up_arr[-1] = arr[-1, :, -1]
+
+    down_arr[1:] = arr[:, :, -1, :]
+    down_arr[0] = arr[0, :, 0]
+
+    return up_arr, down_arr
 
 
 class Interpolate:
@@ -430,11 +486,6 @@ class Interpolate:
 
                     self.transform[i, j] = x_poly(xis) * y_poly(etas)
 
-        self.tnsr = torch.from_numpy(self.transform)
     def interpolate(self, data):
 
         return np.einsum('abcd,cdef->abef', data, self.transform)
-
-    def torch_interpolate(self, data):
-
-        return torch.einsum('abcd,cdef->abef', data, self.tnsr)

@@ -4,11 +4,12 @@ os.environ.setdefault("MPLCONFIGDIR", "/private/tmp")
 
 import numpy as np
 
-from dg_swe.dg_cubed_sphere_swe_numpy import DGCubedSphereSWENumpy, siac_kernel
+from dg_swe.dg_cubed_sphere_swe import DGCubedSphereSWE
+from dg_swe.siac import DGCubedSphereSWESIAC, siac_kernel
 
 
 def _make_solver(poly_order=2, grid=17):
-    return DGCubedSphereSWENumpy(
+    return DGCubedSphereSWESIAC(
         poly_order=poly_order,
         nx=grid,
         ny=grid,
@@ -18,6 +19,22 @@ def _make_solver(poly_order=2, grid=17):
         radius=1.0,
         dtype=np.float64,
     )
+
+
+def test_core_solver_has_no_siac_methods():
+    solver = DGCubedSphereSWE(
+        poly_order=1,
+        nx=3,
+        ny=3,
+        g=9.81,
+        f=1.0e-4,
+        eps=0.1,
+        radius=1.0,
+        dtype=np.float64,
+    )
+
+    assert not hasattr(solver, "siac_filter")
+    assert not hasattr(solver.faces["zp"], "siac_filter")
 
 
 def _interior_mask(face, kernel, scale=1.0):

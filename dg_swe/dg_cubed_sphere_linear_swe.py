@@ -1,7 +1,14 @@
 import numpy as np
-from dg_swe.utils import gll, lagrange1st, cross_product, norm_L2
-import meshzoo
-import torch
+from dg_swe.utils import (
+    cross_product,
+    element_grid_coordinates,
+    gll,
+    lagrange1st,
+    left_right_edge_arrays,
+    norm_L2,
+    to_numpy,
+    up_down_edge_arrays,
+)
 from matplotlib import pyplot as plt
 from dg_swe.geometry import EquiangularFace, SadournyFace
 import os
@@ -313,7 +320,7 @@ class DGCubedSphereLinearSWE:
         for name in self.face_names:
             for i in range(len(vars)):
                 fp = self.make_fp(vars[i], name, fn_template, directory)
-                data = state[name][i].numpy()
+                data = to_numpy(state[name][i])
                 np.save(fp, data)
 
     @staticmethod
@@ -424,30 +431,14 @@ class DGCubedSphereFace:
         xs = np.linspace(-0.5, 0.5, nx)
         ys = np.linspace(-0.5, 0.5, ny)
 
-        lx = np.mean(np.diff(xs))
-        ly = np.mean(np.diff(ys))
+        self.x1, self.y1, lx, ly = element_grid_coordinates(xs, ys, xs_1d, y_1d)
 
         self.cdt = eps * radius * min(lx, ly) / (2 * poly_order + 1)  # this should be multiplied by pi / (2 * sqrt(2)) = 1.11... but eh a slightly smaller time step can't hurt
         self.c_ = np.sqrt(self.g * self.H)
-        points, cells = meshzoo.rectangle_quad(
-            ys,
-            xs,
-        )
-
-        cells = cells.reshape(len(ys) - 1, len(xs) - 1, 4)
 
         w_x, w_y = np.meshgrid(w_x, w_y)
         self.weights_x = w_x[0][None, None, ...]
         self.weights = w_x * w_y
-
-        x1, y1 = np.meshgrid(xs_1d, y_1d)
-
-        x1 = (1 + x1) * lx / 2
-        y1 = (1 + y1) * ly / 2
-
-        # cube face coordinates
-        self.x1 = x1[None, None, ...] * np.ones(cells.shape[:2] + (1, 1)) + points[cells[..., 0]][..., 1][..., None, None]
-        self.y1 = y1[None, None, ...] * np.ones(cells.shape[:2] + (1, 1)) + points[cells[..., 0]][..., 0][..., None, None]
 
         # 3D cartesian coordinates on surface of sphere
         self.xs, self.ys, self.zs = self.geometry.to_cartesian(self.x1, self.y1)
@@ -457,45 +448,36 @@ class DGCubedSphereFace:
         self.l1d = lagrange1st(poly_order, xs_1d)
         n = poly_order + 1
 
-        self.device = torch.device(device)
+        self.device = device
         self.n = n
-        self.weights = torch.from_numpy(self.weights.astype(self.dtype)).to(self.device)
-        self.weights_x = torch.from_numpy(self.weights_x.astype(self.dtype)).to(self.device)
+        self.weights = self.weights.astype(self.dtype, copy=False)
+        self.weights_x = self.weights_x.astype(self.dtype, copy=False)
         self.nx = nx - 1
         self.ny = ny - 1
+        self.D = self.l1d.astype(self.dtype, copy=False)
 
         dxdx1, dxdy1, dxdz1, dydx1, dydy1, dydz1, dzdx1, dzdy1, dzdz1 = self.geometry.covariant_basis(self.x1, self.y1)
-        self.dxdxi = torch.from_numpy(dxdx1.astype(self.dtype)).to(self.device) * lx / 2
-        self.dxdeta = torch.from_numpy(dxdy1.astype(self.dtype)).to(self.device) * ly / 2
-        self.dxdzeta = torch.from_numpy(self.xs.astype(self.dtype)).to(self.device) / radius
+        self.dxdxi = dxdx1.astype(self.dtype, copy=False) * lx / 2
+        self.dxdeta = dxdy1.astype(self.dtype, copy=False) * ly / 2
+        self.dxdzeta = self.xs.astype(self.dtype, copy=False) / radius
         #
-        self.dydxi = torch.from_numpy(dydx1.astype(self.dtype)).to(self.device) * lx / 2
-        self.dydeta = torch.from_numpy(dydy1.astype(self.dtype)).to(self.device) * ly / 2
-        self.dydzeta = torch.from_numpy(self.ys.astype(self.dtype)).to(self.device) / radius
+        self.dydxi = dydx1.astype(self.dtype, copy=False) * lx / 2
+        self.dydeta = dydy1.astype(self.dtype, copy=False) * ly / 2
+        self.dydzeta = self.ys.astype(self.dtype, copy=False) / radius
         #
-        self.dzdxi = torch.from_numpy(dzdx1.astype(self.dtype)).to(self.device) * lx / 2
-        self.dzdeta = torch.from_numpy(dzdy1.astype(self.dtype)).to(self.device) * ly / 2
-        self.dzdzeta = torch.from_numpy(self.zs.astype(self.dtype)).to(self.device) / radius
-
-        self.ddxi = torch.from_numpy(np.zeros((n, n, n, n), dtype=self.dtype)).to(self.device)
-        self.ddeta = torch.zeros((n, n, n, n), dtype=self.ddxi.dtype)
-
-        for i in range(n):
-            for j in range(n):
-                for k in range(n):
-                    for l in range(n):
-                        self.ddxi[i, j, k, l] = self.l1d[l, j] * (k == i)
-                        self.ddeta[i, j, k, l] = self.l1d[k, i] * (l == j)
+        self.dzdxi = dzdx1.astype(self.dtype, copy=False) * lx / 2
+        self.dzdeta = dzdy1.astype(self.dtype, copy=False) * ly / 2
+        self.dzdzeta = self.zs.astype(self.dtype, copy=False) / radius
 
         cross = cross_product(
             [self.dxdxi, self.dydxi, self.dzdxi], [self.dxdzeta, self.dydzeta, self.dzdzeta]
         )
-        self.J_vertface = torch.sqrt(sum(x_ ** 2 for x_ in cross))
+        self.J_vertface = norm_L2(cross)
 
         cross = cross_product(
             [self.dxdeta, self.dydeta, self.dzdeta], [self.dxdzeta, self.dydzeta, self.dzdzeta]
         )
-        self.J_horzface = torch.sqrt(sum(x_ ** 2 for x_ in cross))
+        self.J_horzface = norm_L2(cross)
 
         self.J = self.dxdxi * (self.dydeta * self.dzdzeta - self.dydzeta * self.dzdeta)
         self.J += self.dydxi * (self.dzdeta * self.dxdzeta - self.dzdzeta * self.dxdeta)
@@ -514,16 +496,16 @@ class DGCubedSphereFace:
         self.dzetady = (self.dzdxi * self.dxdeta - self.dzdeta * self.dxdxi) / self.J
         self.dzetadz = (self.dxdxi * self.dydeta - self.dxdeta * self.dydxi) / self.J
 
-        self.dxyzdzeta_norm = torch.sqrt(self.dxdzeta ** 2 + self.dydzeta ** 2 + self.dzdzeta ** 2)
-        self.grad_zeta_norm = torch.sqrt(self.dzetadx ** 2 + self.dzetady ** 2 + self.dzetadz ** 2)
+        self.dxyzdzeta_norm = norm_L2([self.dxdzeta, self.dydzeta, self.dzdzeta])
+        self.grad_zeta_norm = norm_L2([self.dzetadx, self.dzetady, self.dzetadz])
 
         self.kx = self.dzetadx / self.grad_zeta_norm
         self.ky = self.dzetady / self.grad_zeta_norm
         self.kz = self.dzetadz / self.grad_zeta_norm
 
-        self.kx = torch.from_numpy(self.xs.astype(self.dtype)).to(self.device) / radius
-        self.ky = torch.from_numpy(self.ys.astype(self.dtype)).to(self.device) / radius
-        self.kz = torch.from_numpy(self.zs.astype(self.dtype)).to(self.device) / radius
+        self.kx = self.xs.astype(self.dtype, copy=False) / radius
+        self.ky = self.ys.astype(self.dtype, copy=False) / radius
+        self.kz = self.zs.astype(self.dtype, copy=False) / radius
 
         self.J_xi = np.sqrt(self.dxidx ** 2 + self.dxidy ** 2 + self.dxidz ** 2)
         self.J_eta = np.sqrt(self.detadx ** 2 + self.detady ** 2 + self.detadz ** 2)
@@ -560,45 +542,20 @@ class DGCubedSphereFace:
         self.ky_right, self.ky_left = self.make_left_right_arrays(self.ky)
         self.kz_right, self.kz_left = self.make_left_right_arrays(self.kz)
 
-        base_K_1 = torch.zeros((1, 1, n, n, n, n), dtype=self.ddxi.dtype)
-        base_K_2 = torch.zeros((1, 1, n, n, n, n), dtype=self.ddxi.dtype)
-        for i in range(n):
-            for j in range(n):
-                for k in range(n):
-                    for l in range(n):
-                        base_K_1[0, 0, i, j, k, l] = self.weights[k, l] * self.l1d[i, k] * (j == l)
-                        base_K_2[0, 0, i, j, k, l] = self.weights[k, l] * self.l1d[j, l] * (k == i)
-
-        self.weak_grad_eta = base_K_1 * self.J[:, :, :, :, None, None]
-        self.weak_grad_xi = base_K_2 * self.J[:, :, :, :, None, None]
-
         k_cov_norm = norm_L2([self.dxdzeta, self.dydzeta, self.dzdzeta])
-        self.weak_ddeta = base_K_1 * k_cov_norm[:, :, :, :, None, None]
-        self.weak_ddxi = base_K_2 * k_cov_norm[:, :, :, :, None, None]
+        self.k_cov_norm = k_cov_norm
 
     def make_left_right_arrays(self, arr):
-        right_arr = torch.zeros((self.ny, self.nx + 1, self.n), dtype=self.ddxi.dtype)
-        left_arr = torch.zeros((self.ny, self.nx + 1, self.n), dtype=self.ddxi.dtype)
-
-        right_arr[:, :-1] = arr[:, :, :, 0]
-        right_arr[:, -1] = arr[:, -1, :, -1]
-
-        left_arr[:, 1:] = arr[:, :, :, -1]
-        left_arr[:, 0] = arr[:, 0, :, 0]
-
-        return right_arr, left_arr
+        return left_right_edge_arrays(arr, self.ny, self.nx, self.n, self.dtype)
 
     def make_up_down_arrays(self, arr):
-        up_arr = torch.zeros((self.ny + 1, self.nx, self.n), dtype=self.ddxi.dtype)
-        down_arr = torch.zeros((self.ny + 1, self.nx, self.n), dtype=self.ddxi.dtype)
+        return up_down_edge_arrays(arr, self.ny, self.nx, self.n, self.dtype)
 
-        up_arr[:-1] = arr[:, :, 0, :]
-        up_arr[-1] = arr[-1, :, -1]
+    def ddxi(self, arr):
+        return np.matmul(arr, self.D)
 
-        down_arr[1:] = arr[:, :, -1, :]
-        down_arr[0] = arr[0, :, 0]
-
-        return up_arr, down_arr
+    def ddeta(self, arr):
+        return np.einsum('ca,...cb->...ab', self.D, arr)
 
     def boundaries(self, u, v, w, h, t):
 
@@ -641,13 +598,13 @@ class DGCubedSphereFace:
 
     def apply_forcing(self, uk, vk, hk, t, forcing):
         uk_, vk_, hk_ = forcing(self.xs, self.ys, t)
-        uk += torch.from_numpy(uk_.astype(self.dtype)).to(self.device)
-        vk += torch.from_numpy(vk_.astype(self.dtype)).to(self.device)
-        hk += torch.from_numpy(hk_.astype(self.dtype)).to(self.device)
+        uk += to_numpy(uk_, dtype=self.dtype)
+        vk += to_numpy(vk_, dtype=self.dtype)
+        hk += to_numpy(hk_, dtype=self.dtype)
 
     def get_dt(self):
         speed = self.wave_speed(self.u, self.v, self.w, self.h)
-        dt = self.cdt / torch.max(speed).numpy()
+        dt = self.cdt / np.max(speed)
         return dt
 
     def time_step(self, dt=None, order=3, forcing=None):
@@ -683,48 +640,51 @@ class DGCubedSphereFace:
 
     def set_initial_condition(self, u, v, w, h, b=None):
 
-        self.u = torch.from_numpy(u.astype(self.dtype)).to(self.device)
-        self.v = torch.from_numpy(v.astype(self.dtype)).to(self.device)
-        self.w = torch.from_numpy(w.astype(self.dtype)).to(self.device)
+        self.u = to_numpy(u, dtype=self.dtype, copy=True)
+        self.v = to_numpy(v, dtype=self.dtype, copy=True)
+        self.w = to_numpy(w, dtype=self.dtype, copy=True)
 
-        self.h = torch.from_numpy(h.astype(self.dtype)).to(self.device)
+        self.h = to_numpy(h, dtype=self.dtype, copy=True)
 
         if b is None:
-            self.b = torch.zeros_like(self.u).to(self.device)
+            self.b = np.zeros_like(self.u)
         else:
-            self.b = torch.from_numpy(b.astype(self.dtype)).to(self.device)
+            self.b = to_numpy(b, dtype=self.dtype, copy=True)
 
         self.vort = self.dg_vort(self.u, self.v, self.w, self.h)
 
-        self.tmp1 = torch.zeros_like(self.u).to(self.device)
-        self.tmp2 = torch.zeros_like(self.u).to(self.device)
+        self.tmp1 = np.zeros_like(self.u)
+        self.tmp2 = np.zeros_like(self.u)
 
-        self.u_left = torch.zeros((self.ny, self.nx + 1, self.n), dtype=self.tmp1.dtype).to(self.device)
-        self.u_right = torch.zeros((self.ny, self.nx + 1, self.n), dtype=self.tmp1.dtype).to(self.device)
-        self.u_up = torch.zeros((self.ny + 1, self.nx, self.n), dtype=self.tmp1.dtype).to(self.device)
-        self.u_down = torch.zeros((self.ny + 1, self.nx, self.n), dtype=self.tmp1.dtype).to(self.device)
+        edge_lr_shape = (self.ny, self.nx + 1, self.n)
+        edge_ud_shape = (self.ny + 1, self.nx, self.n)
 
-        self.v_left = torch.zeros((self.ny, self.nx + 1, self.n), dtype=self.tmp1.dtype).to(self.device)
-        self.v_right = torch.zeros((self.ny, self.nx + 1, self.n), dtype=self.tmp1.dtype).to(self.device)
-        self.v_up = torch.zeros((self.ny + 1, self.nx, self.n), dtype=self.tmp1.dtype).to(self.device)
-        self.v_down = torch.zeros((self.ny + 1, self.nx, self.n), dtype=self.tmp1.dtype).to(self.device)
+        self.u_left = np.zeros(edge_lr_shape, dtype=self.tmp1.dtype)
+        self.u_right = np.zeros(edge_lr_shape, dtype=self.tmp1.dtype)
+        self.u_up = np.zeros(edge_ud_shape, dtype=self.tmp1.dtype)
+        self.u_down = np.zeros(edge_ud_shape, dtype=self.tmp1.dtype)
 
-        self.w_left = torch.zeros((self.ny, self.nx + 1, self.n), dtype=self.tmp1.dtype).to(self.device)
-        self.w_right = torch.zeros((self.ny, self.nx + 1, self.n), dtype=self.tmp1.dtype).to(self.device)
-        self.w_up = torch.zeros((self.ny + 1, self.nx, self.n), dtype=self.tmp1.dtype).to(self.device)
-        self.w_down = torch.zeros((self.ny + 1, self.nx, self.n), dtype=self.tmp1.dtype).to(self.device)
+        self.v_left = np.zeros(edge_lr_shape, dtype=self.tmp1.dtype)
+        self.v_right = np.zeros(edge_lr_shape, dtype=self.tmp1.dtype)
+        self.v_up = np.zeros(edge_ud_shape, dtype=self.tmp1.dtype)
+        self.v_down = np.zeros(edge_ud_shape, dtype=self.tmp1.dtype)
 
-        self.h_left = torch.zeros((self.ny, self.nx + 1, self.n), dtype=self.tmp1.dtype).to(self.device)
-        self.h_right = torch.zeros((self.ny, self.nx + 1, self.n), dtype=self.tmp1.dtype).to(self.device)
-        self.h_up = torch.zeros((self.ny + 1, self.nx, self.n), dtype=self.tmp1.dtype).to(self.device)
-        self.h_down = torch.zeros((self.ny + 1, self.nx, self.n), dtype=self.tmp1.dtype).to(self.device)
+        self.w_left = np.zeros(edge_lr_shape, dtype=self.tmp1.dtype)
+        self.w_right = np.zeros(edge_lr_shape, dtype=self.tmp1.dtype)
+        self.w_up = np.zeros(edge_ud_shape, dtype=self.tmp1.dtype)
+        self.w_down = np.zeros(edge_ud_shape, dtype=self.tmp1.dtype)
 
-        self.vort_left = torch.zeros((self.ny, self.nx + 1, self.n), dtype=self.tmp1.dtype).to(self.device)
-        self.vort_right = torch.zeros((self.ny, self.nx + 1, self.n), dtype=self.tmp1.dtype).to(self.device)
-        self.vort_up = torch.zeros((self.ny + 1, self.nx, self.n), dtype=self.tmp1.dtype).to(self.device)
-        self.vort_down = torch.zeros((self.ny + 1, self.nx, self.n), dtype=self.tmp1.dtype).to(self.device)
+        self.h_left = np.zeros(edge_lr_shape, dtype=self.tmp1.dtype)
+        self.h_right = np.zeros(edge_lr_shape, dtype=self.tmp1.dtype)
+        self.h_up = np.zeros(edge_ud_shape, dtype=self.tmp1.dtype)
+        self.h_down = np.zeros(edge_ud_shape, dtype=self.tmp1.dtype)
 
-        self.boundaries(self.u, self.v, self.h, self.w, 0)
+        self.vort_left = np.zeros(edge_lr_shape, dtype=self.tmp1.dtype)
+        self.vort_right = np.zeros(edge_lr_shape, dtype=self.tmp1.dtype)
+        self.vort_up = np.zeros(edge_ud_shape, dtype=self.tmp1.dtype)
+        self.vort_down = np.zeros(edge_ud_shape, dtype=self.tmp1.dtype)
+
+        self.boundaries(self.u, self.v, self.w, self.h, 0)
 
     def integrate(self, q):
         return (q * self.weights * abs(self.J)).sum()
@@ -797,8 +757,8 @@ class DGCubedSphereFace:
             h = self.h
 
         vort = self.dg_vort(u, v, w, h)
-        vort_sum = torch.zeros_like(vort) + vort * self.J * self.weights
-        h_sum = torch.zeros_like(h) + h * self.J * self.weights
+        vort_sum = np.zeros_like(vort) + vort * self.J * self.weights
+        h_sum = np.zeros_like(h) + h * self.J * self.weights
 
         Jw = self.J * self.weights
 
@@ -908,8 +868,8 @@ class DGCubedSphereFace:
         h_xflux, h_yflux, h_zflux = self.hflux(u, v, w, h)
         h_xflux, h_yflux = self.phys_to_contra(h_xflux, h_yflux,
                                                h_zflux)  # flux is in contravariant form
-        div = torch.einsum('fgcd,abcd->fgab', h_xflux * self.J, self.ddxi)
-        div += torch.einsum('fgcd,abcd->fgab', h_yflux * self.J, self.ddeta)
+        div = self.ddxi(h_xflux * self.J)
+        div += self.ddeta(h_yflux * self.J)
         div /= self.J
         verbose = False
 
@@ -957,9 +917,9 @@ class DGCubedSphereFace:
 
         uv_flux = self.uv_flux(u, v, w, h)
 
-        alpha = torch.maximum(c_right / self.H, c_left / self.H)
+        alpha = np.maximum(c_right / self.H, c_left / self.H)
         uv_flux_horz = 0.5 * (uv_right_flux + uv_left_flux) - self.a * (h_right_flux - h_left_flux) * alpha #(self.g / c_ho)
-        alpha = torch.maximum(c_up / self.H, c_down / self.H)
+        alpha = np.maximum(c_up / self.H, c_down / self.H)
         uv_flux_vert = 0.5 * (uv_up_flux + uv_down_flux) - self.a * (h_up_flux - h_down_flux) * alpha #(self.g / c_ve) * (h_up_flux - h_down_flux)
 
 
@@ -979,7 +939,7 @@ class DGCubedSphereFace:
         #######
         ###
 
-        out = -torch.einsum('fgcd,abcd->fgab', uv_flux, self.ddxi) * self.J * self.weights
+        out = -self.ddxi(uv_flux) * self.J * self.weights
         out -= vort * u_perp * self.J * self.weights
 
         self.tmp1[:, :, -1] = 0
@@ -994,7 +954,7 @@ class DGCubedSphereFace:
         #######
         ###
 
-        out = -torch.einsum('fgcd,abcd->fgab', uv_flux, self.ddeta) * self.J * self.weights
+        out = -self.ddeta(uv_flux) * self.J * self.weights
         out -= vort * v_perp * self.J * self.weights
 
         self.tmp1[:, :, -1] = (uv_flux_vert - uv_down_flux)[1:] * self.weights_x * (self.J_vertface / self.J_eta)[:, :, -1]
@@ -1034,20 +994,20 @@ class DGCubedSphereFace:
 
     def k_dot_curl(self, u, v, w):
         u_cov, v_cov, w_cov = self.phys_to_cov(u, v, w)
-        out = torch.einsum('fgcd,abcd->fgab', v_cov, self.ddxi) - torch.einsum('fgcd,abcd->fgab', u_cov, self.ddeta)
+        out = self.ddxi(v_cov) - self.ddeta(u_cov)
         return out / self.J
 
     def curl_k(self, psi):
         cov_psi_k = psi * norm_L2([self.dxdzeta, self.dydzeta, self.dzdzeta])
-        u_contra = -torch.einsum('fgcd,abcd->fgab', cov_psi_k, self.ddeta) / self.J
-        v_contra = torch.einsum('fgcd,abcd->fgab', cov_psi_k, self.ddxi) / self.J
+        u_contra = -self.ddeta(cov_psi_k) / self.J
+        v_contra = self.ddxi(cov_psi_k) / self.J
 
         u, v, w = self.contra_to_phys(u_contra, v_contra)
         return u, v, w
 
     def k_cross_grad(self, psi):
-        u_cov = torch.einsum('fgcd,abcd->fgab', psi, self.ddxi)
-        v_cov = torch.einsum('fgcd,abcd->fgab', psi, self.ddeta)
+        u_cov = self.ddxi(psi)
+        v_cov = self.ddeta(psi)
 
         u, v, w = self.cov_to_phys(u_cov, v_cov, 0)
         u, v, w = cross_product([self.kx, self.ky, self.kz], [u, v, w])

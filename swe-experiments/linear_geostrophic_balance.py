@@ -1,7 +1,6 @@
 from matplotlib import pyplot as plt
 from dg_swe.dg_cubed_sphere_linear_swe import DGCubedSphereLinearSWE
 import numpy as np
-import torch
 import os
 
 if not os.path.exists('./plots'): os.makedirs('./plots')
@@ -25,14 +24,12 @@ def initial_condition(face):
     lat, long = face.geometry.lat_long(face.xs, face.ys, face.zs)
     stream = 0.1 * np.sin(long) * np.sin(lat)
 
-    stream = torch.from_numpy(stream)
     u, v, w = face.curl_k(stream)
     h = stream * face.f / g
-    return u.numpy(), v.numpy(), w.numpy(), h.numpy()
+    return u, v, w, h
 
 
-# from dg_swe.dg_cubed_sphere_swe import DGCubedSphereSWE
-# solver = DGCubedSphereSWE(
+# solver = DGCubedSphereLinearSWE(
 #     poly_order, nx, ny, g, f,
 #     eps, device=dev, solution=None, a=0.5, radius=1,
 #     dtype=np.float64, damping=None

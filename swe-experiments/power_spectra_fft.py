@@ -1,5 +1,5 @@
 from matplotlib import pyplot as plt
-from dg_swe.dg_cubed_sphere_swe_numpy import DGCubedSphereSWENumpy
+from dg_swe.dg_cubed_sphere_swe import DGCubedSphereSWE
 import numpy as np
 import os
 import pickle
@@ -7,7 +7,6 @@ import pickle
 
 plt.rcParams['font.size'] = '14'
 
-use_siac = False
 compute = True
 eps = 0.8
 g = 9.80616 / 250
@@ -103,10 +102,7 @@ fn_template = get_fn_template(20)
 data_dir = os.path.join('data', get_fn_template())
 plot_dir = os.path.join('plots', get_fn_template())
 
-if use_siac:
-    out_fp = os.path.join(plot_dir, f'siac_spectra_{fn_template}.png')
-else:
-    out_fp = os.path.join(plot_dir, f'spectra_{fn_template}.png')
+out_fp = os.path.join(plot_dir, f'spectra_{fn_template}.png')
 
 
 def make_latlon_grid(nlat, nlon):
@@ -121,78 +117,21 @@ def make_latlon_grid(nlat, nlon):
 
 def evaluate_ke_latlon(solver, lat_grid, lon_grid):
     # Match power_spectra.py: form nodal KE first, then evaluate that DG field.
-    if use_siac:
-
-        h_siac = solver.siac_filter(
-            dict((name, solver.faces[name].h) for name in solver.face_names),
-            boundary='sphere',
-            quadrature_order=10,
-            scale=0.75
-        )
-
-        u_siac = solver.siac_filter(
-            dict((name, solver.faces[name].u) for name in solver.face_names),
-            boundary='sphere',
-            quadrature_order=10,
-            scale=0.75
-        )
-
-        v_siac = solver.siac_filter(
-            dict((name, solver.faces[name].v) for name in solver.face_names),
-            boundary='sphere',
-            quadrature_order=10,
-            scale=0.75
-        )
-
-        w_siac = solver.siac_filter(
-            dict((name, solver.faces[name].w) for name in solver.face_names),
-            boundary='sphere',
-            quadrature_order=10,
-            scale=0.75
-        )
-
-        ke_coeffs = dict(
-            (name, 0.5 * h_siac[name] * (u_siac[name]**2 + v_siac[name]**2 + w_siac[name]**2))
-            for name in solver.face_names
-        )
-
-    else:
-        ke_coeffs = {
-            name: 0.5 * face.h * (face.u ** 2 + face.v ** 2 + face.w ** 2)
-            for name, face in solver.faces.items()
-        }
+    ke_coeffs = {
+        name: 0.5 * face.h * (face.u ** 2 + face.v ** 2 + face.w ** 2)
+        for name, face in solver.faces.items()
+    }
 
     return solver.evaluate_latlong(lat_grid, lon_grid, ke_coeffs)
 
 
 def evaluate_enstrophy_latlon(solver, lat_grid, lon_grid):
 
-    if use_siac:
-        rel_vort_siac = solver.siac_vorticity(
-            include_coriolis=False, 
-            boundary='sphere',
-            quadrature_order=10,
-            scale=0.75
-        )
-
-        h_siac = solver.siac_filter(
-            dict((name, solver.faces[name].h) for name in solver.face_names),
-            boundary='sphere',
-            quadrature_order=10,
-            scale=0.75
-        )
-
-        enstrophy_coeffs = dict(
-            (name, rel_vort_siac[name]**2 / h_siac[name])
-            for name in solver.face_names
-        )
-
-    else:
-        vort = solver.vorticity()
-        enstrophy_coeffs = {
-            name: (vort[name] - face.f)**2 / face.h 
-            for name, face in solver.faces.items()
-        }
+    vort = solver.vorticity()
+    enstrophy_coeffs = {
+        name: (vort[name] - face.f)**2 / face.h
+        for name, face in solver.faces.items()
+    }
 
     return solver.evaluate_latlong(lat_grid, lon_grid, enstrophy_coeffs)
 
@@ -348,16 +287,13 @@ def main():
     os.makedirs(plot_dir, exist_ok=True)
     os.makedirs(data_dir, exist_ok=True)
 
-    solver = DGCubedSphereSWENumpy(
+    solver = DGCubedSphereSWE(
         poly_order, nx, ny, g, f,
         eps, radius=radius,
         dtype=np.float64, flux_type=flux_type,
     )
 
-    if use_siac:
-        coeffs_fp = os.path.join(data_dir, f'siac_coeffs_{fn_template}.pkl')
-    else:
-        coeffs_fp = os.path.join(data_dir, f'coeffs_{fn_template}.pkl')
+    coeffs_fp = os.path.join(data_dir, f'coeffs_{fn_template}.pkl')
     if compute:
         print('Loading', fn_template)
         solver.load_restart(fn_template + '.npy', data_dir)

@@ -4,8 +4,8 @@ os.environ.setdefault("MPLCONFIGDIR", "/private/tmp")
 
 import numpy as np
 
-import dg_swe.dg_cubed_sphere_swe_numpy as swe_numpy
-from dg_swe.dg_cubed_sphere_swe_numpy import DGCubedSphereSWENumpy
+import dg_swe.dg_cubed_sphere_swe as swe
+from dg_swe.dg_cubed_sphere_swe import DGCubedSphereSWE
 
 
 FACE_NAMES = ("zp", "zn", "xp", "xn", "yp", "yn")
@@ -113,11 +113,11 @@ def test_numpy_mpi_boundary_buffers_match_serial_exchange():
         radius=1.0,
         dtype=np.float64,
     )
-    serial = DGCubedSphereSWENumpy(**solver_kwargs)
+    serial = DGCubedSphereSWE(**solver_kwargs)
 
     mailbox = {}
     parallel = [
-        DGCubedSphereSWENumpy(
+        DGCubedSphereSWE(
             **solver_kwargs,
             nprocx=1,
             nprocy=1,
@@ -160,16 +160,16 @@ def test_numpy_mpi_boundary_buffers_match_serial_exchange():
 
 def test_numpy_mpi_face_setup_receives_local_subtile_sizes(monkeypatch):
     calls = []
-    original_face_class = swe_numpy.DGCubedSphereFaceNumpy
+    original_face_class = swe.DGCubedSphereFace
 
     class RecordingFace(original_face_class):
         def __init__(self, name, poly_order, nx, ny, *args, **kwargs):
             calls.append((name, nx, ny, kwargs.copy()))
             super().__init__(name, poly_order, nx, ny, *args, **kwargs)
 
-    monkeypatch.setattr(swe_numpy, "DGCubedSphereFaceNumpy", RecordingFace)
+    monkeypatch.setattr(swe, "DGCubedSphereFace", RecordingFace)
 
-    DGCubedSphereSWENumpy(
+    DGCubedSphereSWE(
         poly_order=1,
         nx=9,
         ny=9,
@@ -211,7 +211,7 @@ def test_numpy_mpi_restart_files_are_full_faces_for_subtile_ranks(tmp_path):
     size = len(FACE_NAMES) * nprocx * nprocy
     mailbox = {}
     solvers = [
-        DGCubedSphereSWENumpy(
+        DGCubedSphereSWE(
             **solver_kwargs,
             nprocx=nprocx,
             nprocy=nprocy,
@@ -258,7 +258,7 @@ def test_numpy_mpi_restart_files_are_full_faces_for_subtile_ranks(tmp_path):
                 )
 
     reloaded = [
-        DGCubedSphereSWENumpy(
+        DGCubedSphereSWE(
             **solver_kwargs,
             nprocx=nprocx,
             nprocy=nprocy,
