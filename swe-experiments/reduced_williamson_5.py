@@ -245,7 +245,7 @@ if mode == 'run':
         if rank == 0:
             daily_diagnostics.append(day_diagnostics)
 
-        if ((i + 1) % n_save == 0):
+        if ((i + 1) % n_save == 0) or (i >= 720 and i < 1080):
             fn_template = get_fn_template(i + 1)
             if rank == 0:
                 print('Saving:', fn_template)
