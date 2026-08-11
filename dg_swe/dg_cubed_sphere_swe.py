@@ -1352,7 +1352,7 @@ class DGCubedSphereFace:
             w = self.w
         if h is None:
             h = self.h
-        return 0.5 * h * (u ** 2 + v ** 2 + w ** 2 + self.g * h)
+        return 0.5 * h * (u ** 2 + v ** 2 + w ** 2 + self.g * (h + self.b))
 
     def enstrophy(self, u=None, v=None, w=None, h=None):
         if u is None:
@@ -1616,20 +1616,13 @@ class DGCubedSphereFace:
                 self.g, 0.0, 0.0, False,
             )
             _apply_barth_normal_tangent_diss_numba(
-                u_k, v_k, w_k, h_k, self.g, self.endpoint_weight,
+                u_k, v_k, w_k, h_k, self.g,
                 self.vert_upper_edge_factor, self.vert_lower_edge_factor,
                 self.horz_right_edge_factor, self.horz_left_edge_factor,
-                self.dxidx, self.dxidy, self.dxidz, self.detadx, self.detady, self.detadz,
                 self.u_up, self.v_up, self.w_up, self.h_up, self.u_down, self.v_down, self.w_down, self.h_down,
                 self.u_right, self.v_right, self.w_right, self.h_right, self.u_left, self.v_left, self.w_left, self.h_left,
                 self.eta_x_up, self.eta_y_up, self.eta_z_up, self.eta_x_down, self.eta_y_down, self.eta_z_down,
                 self.xi_x_right, self.xi_y_right, self.xi_z_right, self.xi_x_left, self.xi_y_left, self.xi_z_left,
-                self.dxidx_up, self.dxidy_up, self.dxidz_up, self.dxidx_down, self.dxidy_down, self.dxidz_down,
-                self.dxidx_right, self.dxidy_right, self.dxidz_right, self.dxidx_left, self.dxidy_left, self.dxidz_left,
-                self.detadx_up, self.detady_up, self.detadz_up, self.detadx_down, self.detady_down, self.detadz_down,
-                self.detadx_right, self.detady_right, self.detadz_right, self.detadx_left, self.detady_left, self.detadz_left,
-                self.dxdxi_up, self.dydxi_up, self.dzdxi_up, self.dxdxi_down, self.dydxi_down, self.dzdxi_down,
-                self.dxdeta_right, self.dydeta_right, self.dzdeta_right, self.dxdeta_left, self.dydeta_left, self.dzdeta_left,
             )
             return u_k, v_k, w_k, h_k
 
@@ -2042,165 +2035,82 @@ class DGCubedSphereFace:
         v_k[:, :, :, 0] += (dm_v - self.v_right[:, :-1] * dh_k) / h_r
         w_k[:, :, :, 0] += (dm_w - self.w_right[:, :-1] * dh_k) / h_r
 
-    def _apply_barth_normal_tangent_diss_numpy(self, u_k, v_k, w_k, h_k):
-        h_up_flux = self.h_up * (
-            self.u_up * self.eta_x_up
-            + self.v_up * self.eta_y_up
-            + self.w_up * self.eta_z_up
-        )
-        h_down_flux = self.h_down * (
-            self.u_down * self.eta_x_down
-            + self.v_down * self.eta_y_down
-            + self.w_down * self.eta_z_down
-        )
-        h_right_flux = self.h_right * (
-            self.u_right * self.xi_x_right
-            + self.v_right * self.xi_y_right
-            + self.w_right * self.xi_z_right
-        )
-        h_left_flux = self.h_left * (
-            self.u_left * self.xi_x_left
-            + self.v_left * self.xi_y_left
-            + self.w_left * self.xi_z_left
-        )
-
-        vel_up = h_up_flux / self.h_up
-        vel_down = h_down_flux / self.h_down
-        vel_right = h_right_flux / self.h_right
-        vel_left = h_left_flux / self.h_left
-        c_adv_vert = 0.5 * (vel_up + vel_down) #+ np.sqrt(self.g * self.h_down) - np.sqrt(self.g * self.h_up)
-        c_adv_horz = 0.5 * (vel_right + vel_left) #+ np.sqrt(self.g * self.h_left) - np.sqrt(self.g * self.h_right)
-
-        u_cov_up = self.u_up * self.dxdxi_up + self.v_up * self.dydxi_up + self.w_up * self.dzdxi_up
-        u_cov_down = self.u_down * self.dxdxi_down + self.v_down * self.dydxi_down + self.w_down * self.dzdxi_down
-        v_cov_right = self.u_right * self.dxdeta_right + self.v_right * self.dydeta_right + self.w_right * self.dzdeta_right
-        v_cov_left = self.u_left * self.dxdeta_left + self.v_left * self.dydeta_left + self.w_left * self.dzdeta_left
-
-        u_contra_up = self.u_up * self.dxidx_up + self.v_up * self.dxidy_up + self.w_up * self.dxidz_up
-        u_contra_down = self.u_down * self.dxidx_down + self.v_down * self.dxidy_down + self.w_down * self.dxidz_down
-        v_contra_up = self.u_up * self.detadx_up + self.v_up * self.detady_up + self.w_up * self.detadz_up
-        v_contra_down = self.u_down * self.detadx_down + self.v_down * self.detady_down + self.w_down * self.detadz_down
-        u_contra_right = self.u_right * self.dxidx_right + self.v_right * self.dxidy_right + self.w_right * self.dxidz_right
-        u_contra_left = self.u_left * self.dxidx_left + self.v_left * self.dxidy_left + self.w_left * self.dxidz_left
-        v_contra_right = self.u_right * self.detadx_right + self.v_right * self.detady_right + self.w_right * self.detadz_right
-        v_contra_left = self.u_left * self.detadx_left + self.v_left * self.detady_left + self.w_left * self.detadz_left
-
-        n_x = 0.5 * (self.eta_x_down + self.eta_x_up)
-        n_y = 0.5 * (self.eta_y_down + self.eta_y_up)
-        n_z = 0.5 * (self.eta_z_down + self.eta_z_up)
+    def _barth_1d_normal_dissipation_numpy(
+            self, u_l, v_l, w_l, h_l, u_r, v_r, w_r, h_r, n_x, n_y, n_z):
         n_norm = np.sqrt(n_x ** 2 + n_y ** 2 + n_z ** 2)
         n_x = n_x / n_norm
         n_y = n_y / n_norm
         n_z = n_z / n_norm
-        h_avg = 0.5 * (self.h_down + self.h_up)
+
+        un_l = u_l * n_x + v_l * n_y + w_l * n_z
+        un_r = u_r * n_x + v_r * n_y + w_r * n_z
+        h_avg = 0.5 * (h_l + h_r)
         c = np.sqrt(self.g * h_avg)
-        u_n = 0.5 * (
-            (self.u_down + self.u_up) * n_x
-            + (self.v_down + self.v_up) * n_y
-            + (self.w_down + self.w_up) * n_z
-        )
-        du_n = (
-            (self.u_up - self.u_down) * n_x
-            + (self.v_up - self.v_down) * n_y
-            + (self.w_up - self.w_down) * n_z
-        )
-        dh = self.h_up - self.h_down
+        u_n = 0.5 * (un_l + un_r)
+        du_n = un_r - un_l
+        dh = h_r - h_l
+
         mu_m = np.abs(u_n - c)
         mu_p = np.abs(u_n + c)
         amp_m = (self.g * dh - c * du_n) / (2.0 * self.g)
         amp_p = (self.g * dh + c * du_n) / (2.0 * self.g)
+
         diss_h = mu_m * amp_m + mu_p * amp_p
         diss_un = mu_m * amp_m * (u_n - c) + mu_p * amp_p * (u_n + c)
-        delta_tan = -0.5 * (1.0 - 2.0 * (c_adv_vert < 0.0)) * (u_cov_up - u_cov_down)
-        wx = self.endpoint_weight
+        return n_x, n_y, n_z, un_l, un_r, diss_h, diss_un
+
+    def _apply_barth_normal_tangent_diss_numpy(self, u_k, v_k, w_k, h_k):
+        n_x, n_y, n_z, un_l, un_r, diss_h, diss_un = self._barth_1d_normal_dissipation_numpy(
+            self.u_down, self.v_down, self.w_down, self.h_down,
+            self.u_up, self.v_up, self.w_up, self.h_up,
+            0.5 * (self.eta_x_down + self.eta_x_up),
+            0.5 * (self.eta_y_down + self.eta_y_up),
+            0.5 * (self.eta_z_down + self.eta_z_up),
+        )
 
         scale = 0.5 * self.vert_upper_edge_factor
         dh_k = scale * diss_h[1:]
         h_l = self.h_down[1:]
-        un_l = self.u_down[1:] * n_x[1:] + self.v_down[1:] * n_y[1:] + self.w_down[1:] * n_z[1:]
-        dun = (scale * diss_un[1:] - un_l * dh_k) / h_l
+        dun = (scale * diss_un[1:] - un_l[1:] * dh_k) / h_l
         h_k[:, :, -1] += dh_k
         u_k[:, :, -1] += dun * n_x[1:]
         v_k[:, :, -1] += dun * n_y[1:]
         w_k[:, :, -1] += dun * n_z[1:]
-        du_cov = -v_contra_down[1:] * delta_tan[1:] / wx
-        dv_cov = u_contra_down[1:] * delta_tan[1:] / wx
-        u_k[:, :, -1] += du_cov * self.dxidx[:, :, -1] + dv_cov * self.detadx[:, :, -1]
-        v_k[:, :, -1] += du_cov * self.dxidy[:, :, -1] + dv_cov * self.detady[:, :, -1]
-        w_k[:, :, -1] += du_cov * self.dxidz[:, :, -1] + dv_cov * self.detadz[:, :, -1]
 
         scale = -0.5 * self.vert_lower_edge_factor
         dh_k = scale * diss_h[:-1]
         h_r = self.h_up[:-1]
-        un_r = self.u_up[:-1] * n_x[:-1] + self.v_up[:-1] * n_y[:-1] + self.w_up[:-1] * n_z[:-1]
-        dun = (scale * diss_un[:-1] - un_r * dh_k) / h_r
+        dun = (scale * diss_un[:-1] - un_r[:-1] * dh_k) / h_r
         h_k[:, :, 0] += dh_k
         u_k[:, :, 0] += dun * n_x[:-1]
         v_k[:, :, 0] += dun * n_y[:-1]
         w_k[:, :, 0] += dun * n_z[:-1]
-        du_cov = v_contra_up[:-1] * delta_tan[:-1] / wx
-        dv_cov = -u_contra_up[:-1] * delta_tan[:-1] / wx
-        u_k[:, :, 0] += du_cov * self.dxidx[:, :, 0] + dv_cov * self.detadx[:, :, 0]
-        v_k[:, :, 0] += du_cov * self.dxidy[:, :, 0] + dv_cov * self.detady[:, :, 0]
-        w_k[:, :, 0] += du_cov * self.dxidz[:, :, 0] + dv_cov * self.detadz[:, :, 0]
 
-        n_x = 0.5 * (self.xi_x_left + self.xi_x_right)
-        n_y = 0.5 * (self.xi_y_left + self.xi_y_right)
-        n_z = 0.5 * (self.xi_z_left + self.xi_z_right)
-        n_norm = np.sqrt(n_x ** 2 + n_y ** 2 + n_z ** 2)
-        n_x = n_x / n_norm
-        n_y = n_y / n_norm
-        n_z = n_z / n_norm
-        h_avg = 0.5 * (self.h_left + self.h_right)
-        c = np.sqrt(self.g * h_avg)
-        u_n = 0.5 * (
-            (self.u_left + self.u_right) * n_x
-            + (self.v_left + self.v_right) * n_y
-            + (self.w_left + self.w_right) * n_z
+        n_x, n_y, n_z, un_l, un_r, diss_h, diss_un = self._barth_1d_normal_dissipation_numpy(
+            self.u_left, self.v_left, self.w_left, self.h_left,
+            self.u_right, self.v_right, self.w_right, self.h_right,
+            0.5 * (self.xi_x_left + self.xi_x_right),
+            0.5 * (self.xi_y_left + self.xi_y_right),
+            0.5 * (self.xi_z_left + self.xi_z_right),
         )
-        du_n = (
-            (self.u_right - self.u_left) * n_x
-            + (self.v_right - self.v_left) * n_y
-            + (self.w_right - self.w_left) * n_z
-        )
-        dh = self.h_right - self.h_left
-        mu_m = np.abs(u_n - c)
-        mu_p = np.abs(u_n + c)
-        amp_m = (self.g * dh - c * du_n) / (2.0 * self.g)
-        amp_p = (self.g * dh + c * du_n) / (2.0 * self.g)
-        diss_h = mu_m * amp_m + mu_p * amp_p
-        diss_un = mu_m * amp_m * (u_n - c) + mu_p * amp_p * (u_n + c)
-        delta_tan = -0.5 * (1.0 - 2.0 * (c_adv_horz < 0.0)) * (v_cov_right - v_cov_left)
 
         scale = 0.5 * self.horz_right_edge_factor
         dh_k = scale * diss_h[:, 1:]
         h_l = self.h_left[:, 1:]
-        un_l = self.u_left[:, 1:] * n_x[:, 1:] + self.v_left[:, 1:] * n_y[:, 1:] + self.w_left[:, 1:] * n_z[:, 1:]
-        dun = (scale * diss_un[:, 1:] - un_l * dh_k) / h_l
+        dun = (scale * diss_un[:, 1:] - un_l[:, 1:] * dh_k) / h_l
         h_k[:, :, :, -1] += dh_k
         u_k[:, :, :, -1] += dun * n_x[:, 1:]
         v_k[:, :, :, -1] += dun * n_y[:, 1:]
         w_k[:, :, :, -1] += dun * n_z[:, 1:]
-        du_cov = v_contra_left[:, 1:] * delta_tan[:, 1:] / wx
-        dv_cov = -u_contra_left[:, 1:] * delta_tan[:, 1:] / wx
-        u_k[:, :, :, -1] += du_cov * self.dxidx[:, :, :, -1] + dv_cov * self.detadx[:, :, :, -1]
-        v_k[:, :, :, -1] += du_cov * self.dxidy[:, :, :, -1] + dv_cov * self.detady[:, :, :, -1]
-        w_k[:, :, :, -1] += du_cov * self.dxidz[:, :, :, -1] + dv_cov * self.detadz[:, :, :, -1]
 
         scale = -0.5 * self.horz_left_edge_factor
         dh_k = scale * diss_h[:, :-1]
         h_r = self.h_right[:, :-1]
-        un_r = self.u_right[:, :-1] * n_x[:, :-1] + self.v_right[:, :-1] * n_y[:, :-1] + self.w_right[:, :-1] * n_z[:, :-1]
-        dun = (scale * diss_un[:, :-1] - un_r * dh_k) / h_r
+        dun = (scale * diss_un[:, :-1] - un_r[:, :-1] * dh_k) / h_r
         h_k[:, :, :, 0] += dh_k
         u_k[:, :, :, 0] += dun * n_x[:, :-1]
         v_k[:, :, :, 0] += dun * n_y[:, :-1]
         w_k[:, :, :, 0] += dun * n_z[:, :-1]
-        du_cov = -v_contra_right[:, :-1] * delta_tan[:, :-1] / wx
-        dv_cov = u_contra_right[:, :-1] * delta_tan[:, :-1] / wx
-        u_k[:, :, :, 0] += du_cov * self.dxidx[:, :, :, 0] + dv_cov * self.detadx[:, :, :, 0]
-        v_k[:, :, :, 0] += du_cov * self.dxidy[:, :, :, 0] + dv_cov * self.detady[:, :, :, 0]
-        w_k[:, :, :, 0] += du_cov * self.dxidz[:, :, :, 0] + dv_cov * self.detadz[:, :, :, 0]
 
     def _solve_numpy_lmars_kernel(self, u, v, w, h, t, dt, *, tangent_diss, verbose=False):
 
