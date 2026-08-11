@@ -37,7 +37,7 @@ if args.plot:
 else:
     mode = 'run'    
 
-nx = ny = args.nx + 1
+nx = ny = args.nx
 poly_order = args.order
 
 eps = 1.3
@@ -122,7 +122,7 @@ def get_fn_template(a, flux_type, h_diss, day=None):
     if day is not None:
         suffix = suffix + f'_day_{day}'
 
-    return f"compressed_galewsky_nx{nx-1}_p{poly_order}_{suffix}"
+    return f"compressed_galewsky_nx{nx}_p{poly_order}_{suffix}"
 
 
 parameters_list = [

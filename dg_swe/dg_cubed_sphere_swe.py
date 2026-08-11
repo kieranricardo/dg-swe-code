@@ -93,8 +93,8 @@ class DGCubedSphereSWE:
             global_ny, local_ny, y_min, y_max = self._local_axis_partition(
                 ny, self.nprocy, self.y_proc_idx, "ny"
             )
-            face_nx = local_nx + 1
-            face_ny = local_ny + 1
+            face_nx = local_nx
+            face_ny = local_ny
             face_partition = {
                 "global_nx": global_nx,
                 "global_ny": global_ny,
@@ -155,11 +155,12 @@ class DGCubedSphereSWE:
         return 6 * self.nprocx * self.nprocy
 
     @staticmethod
-    def _local_axis_partition(num_points, nproc, proc_idx, name):
-        num_elements = num_points - 1
+    def _local_axis_partition(num_elements, nproc, proc_idx, name):
+        if num_elements <= 0:
+            raise ValueError(f"{name} must be positive; got {name}={num_elements}.")
         if num_elements % nproc != 0:
             raise ValueError(
-                f"{name} - 1 must be divisible by nproc; got {name}={num_points}, nproc={nproc}."
+                f"{name} must be divisible by nproc; got {name}={num_elements}, nproc={nproc}."
             )
 
         local_elements = num_elements // nproc
@@ -962,22 +963,26 @@ class DGCubedSphereFace:
             )
 
         if explicit_domain:
-            local_nx = nx - 1
-            local_ny = ny - 1
+            local_nx = nx
+            local_ny = ny
             if global_nx is None:
                 global_nx = local_nx
             if global_ny is None:
                 global_ny = local_ny
         else:
-            global_nx = nx - 1 if global_nx is None else global_nx
-            global_ny = ny - 1 if global_ny is None else global_ny
+            global_nx = nx if global_nx is None else global_nx
+            global_ny = ny if global_ny is None else global_ny
+            if global_nx <= 0 or global_ny <= 0:
+                raise ValueError(
+                    f"Face dimensions must be positive; got nx={global_nx}, ny={global_ny}."
+                )
             if global_nx % nprocx != 0:
                 raise ValueError(
-                    f"nx - 1 must be divisible by nprocx; got nx={nx}, nprocx={nprocx}."
+                    f"nx must be divisible by nprocx; got nx={nx}, nprocx={nprocx}."
                 )
             if global_ny % nprocy != 0:
                 raise ValueError(
-                    f"ny - 1 must be divisible by nprocy; got ny={ny}, nprocy={nprocy}."
+                    f"ny must be divisible by nprocy; got ny={ny}, nprocy={nprocy}."
                 )
             local_nx = global_nx // nprocx
             local_ny = global_ny // nprocy

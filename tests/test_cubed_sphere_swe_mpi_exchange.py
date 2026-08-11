@@ -171,8 +171,8 @@ def test_numpy_mpi_face_setup_receives_local_subtile_sizes(monkeypatch):
 
     DGCubedSphereSWE(
         poly_order=1,
-        nx=9,
-        ny=9,
+        nx=8,
+        ny=8,
         g=9.81,
         f=1.0e-4,
         eps=0.1,
@@ -186,8 +186,8 @@ def test_numpy_mpi_face_setup_receives_local_subtile_sizes(monkeypatch):
     assert len(calls) == 1
     name, nx, ny, kwargs = calls[0]
     assert name == "zn"
-    assert nx == 5
-    assert ny == 5
+    assert nx == 4
+    assert ny == 4
     assert kwargs["global_nx"] == 8
     assert kwargs["global_ny"] == 8
     assert kwargs["x_min"] == -0.5
@@ -199,8 +199,8 @@ def test_numpy_mpi_face_setup_receives_local_subtile_sizes(monkeypatch):
 def test_numpy_mpi_restart_files_are_full_faces_for_subtile_ranks(tmp_path):
     solver_kwargs = dict(
         poly_order=1,
-        nx=5,
-        ny=5,
+        nx=4,
+        ny=4,
         g=9.81,
         f=1.0e-4,
         eps=0.1,

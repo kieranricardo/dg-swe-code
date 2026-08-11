@@ -27,10 +27,10 @@ else:
     ah = 0.0
 
 
-nx = ny = 32 + 1
-max_n = (poly_order + 1) * (nx - 1) * 4 // 2
-nlat = max(4 * max_n + 1, 2 * (ny - 1) * (poly_order + 1) + 1)
-nlon = max(8 * max_n + 2, 4 * (nx - 1) * (poly_order + 1) + 2)
+nx = ny = 32
+max_n = (poly_order + 1) * nx * 4 // 2
+nlat = max(4 * max_n + 1, 2 * ny * (poly_order + 1) + 1)
+nlon = max(8 * max_n + 2, 4 * nx * (poly_order + 1) + 2)
 
 
 def get_rw_fn_template(day=None):
@@ -56,9 +56,9 @@ def get_rw_fn_template(day=None):
         raise ValueError(f'suffix: expedcted one of 3000, 4000. Found {s_0}.')
 
     if day is None:
-        return f"reduced_williamson_5_day_nx{nx-1}_p{poly_order}_{suffix}"
+        return f"reduced_williamson_5_day_nx{nx}_p{poly_order}_{suffix}"
     else:
-        return f"reduced_williamson_5_day_nx{nx-1}_p{poly_order}_{suffix}_{day}"
+        return f"reduced_williamson_5_day_nx{nx}_p{poly_order}_{suffix}_{day}"
 
 
 def get_galewsky_fn_template(day=None):
@@ -85,7 +85,7 @@ def get_galewsky_fn_template(day=None):
     if day is not None:
         suffix = suffix + f'_day_{day}'
 
-    return f"galewsky_nx{nx-1}_p{poly_order}_{suffix}"
+    return f"galewsky_nx{nx}_p{poly_order}_{suffix}"
 
 
 

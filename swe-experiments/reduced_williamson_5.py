@@ -46,7 +46,7 @@ else:
     mode = 'run'    
     day = args.day
 
-nx = ny = args.nx + 1
+nx = ny = args.nx
 poly_order = args.order
 g = 9.80616 / 250
 f = 7.292e-5
@@ -90,9 +90,9 @@ def get_fn_template(day=None):
             raise ValueError(f'suffix: expedcted one of 3000, 4000. Found {s_0}.')
 
     if day is None:
-        return f"reduced_williamson_5_day_nx{nx-1}_p{poly_order}_{suffix}"
+        return f"reduced_williamson_5_day_nx{nx}_p{poly_order}_{suffix}"
     else:
-        return f"reduced_williamson_5_day_nx{nx-1}_p{poly_order}_{suffix}_{day}"
+        return f"reduced_williamson_5_day_nx{nx}_p{poly_order}_{suffix}_{day}"
 
 data_dir = os.path.join('data', get_fn_template())
 plot_dir = os.path.join('plots', get_fn_template())

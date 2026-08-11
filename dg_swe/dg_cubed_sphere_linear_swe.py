@@ -428,8 +428,11 @@ class DGCubedSphereFace:
         [xs_1d, w_x] = gll(poly_order, iterative=True)
         [y_1d, w_y] = gll(poly_order, iterative=True)
 
-        xs = np.linspace(-0.5, 0.5, nx)
-        ys = np.linspace(-0.5, 0.5, ny)
+        if nx <= 0 or ny <= 0:
+            raise ValueError(f"Face dimensions must be positive; got nx={nx}, ny={ny}.")
+
+        xs = np.linspace(-0.5, 0.5, nx + 1)
+        ys = np.linspace(-0.5, 0.5, ny + 1)
 
         self.x1, self.y1, lx, ly = element_grid_coordinates(xs, ys, xs_1d, y_1d)
 
@@ -452,8 +455,8 @@ class DGCubedSphereFace:
         self.n = n
         self.weights = self.weights.astype(self.dtype, copy=False)
         self.weights_x = self.weights_x.astype(self.dtype, copy=False)
-        self.nx = nx - 1
-        self.ny = ny - 1
+        self.nx = nx
+        self.ny = ny
         self.D = self.l1d.astype(self.dtype, copy=False)
 
         dxdx1, dxdy1, dxdz1, dydx1, dydy1, dydz1, dzdx1, dzdy1, dzdz1 = self.geometry.covariant_basis(self.x1, self.y1)
