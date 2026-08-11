@@ -1701,7 +1701,7 @@ class DGCubedSphereFace:
                 self.dxdxi_right, self.dydxi_right, self.dzdxi_right, self.dxdxi_left, self.dydxi_left, self.dzdxi_left,
                 self.dxdeta_up, self.dydeta_up, self.dzdeta_up, self.dxdeta_down, self.dydeta_down, self.dzdeta_down,
                 self.dxdeta_right, self.dydeta_right, self.dzdeta_right, self.dxdeta_left, self.dydeta_left, self.dzdeta_left,
-                self.g, 0.0, 0.0, False,
+                self.g, 0.0, 0.0, True,
             )
             _apply_barth_normal_tangent_diss_numba(
                 u_k, v_k, w_k, h_k, self.g,
@@ -1797,7 +1797,7 @@ class DGCubedSphereFace:
 
     def solve_numpy_barth_normal_tangent_diss(self, u, v, w, h, t, dt, *, verbose=False):
         u_k, v_k, w_k, h_k = self._solve_numpy_standard(
-            u, v, w, h, t, dt, tangent_diss=False, a=0.0, ah=0.0, verbose=verbose
+            u, v, w, h, t, dt, tangent_diss=True, a=0.0, ah=0.0, verbose=verbose
         )
         self._apply_barth_normal_tangent_diss_numpy(u_k, v_k, w_k, h_k)
         return u_k, v_k, w_k, h_k
