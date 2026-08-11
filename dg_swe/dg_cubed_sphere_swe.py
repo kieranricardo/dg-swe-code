@@ -1352,7 +1352,7 @@ class DGCubedSphereFace:
             w = self.w
         if h is None:
             h = self.h
-        return 0.5 * h * (u ** 2 + v ** 2 + w ** 2 + self.g * (h + self.b))
+        return 0.5 * h * (u ** 2 + v ** 2 + w ** 2 + self.g * h) + h * self.b * self.g
 
     def enstrophy(self, u=None, v=None, w=None, h=None):
         if u is None:
