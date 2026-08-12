@@ -86,7 +86,7 @@ def get_fn_template(day=None):
 data_dir = os.path.join('data', get_fn_template())
 plot_dir = os.path.join('plots', get_fn_template())
 
-days = [400, 1200, 2400, 3500]
+days = [400, 1200, 2400, 3600]
 
 solver = DGCubedSphereSWE(
     poly_order, nx, ny, g, f,
