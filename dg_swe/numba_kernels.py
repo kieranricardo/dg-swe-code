@@ -127,6 +127,7 @@ if njit is not None:
                     inv_h_sum = 1.0 / h_sum
                     c_snd = 0.5 * (np.sqrt(g * hh_up) + np.sqrt(g * hh_down))
                     c_adv = (h_up_flux_val + h_down_flux_val) * inv_h_sum
+                    c_adv_tangent = 0.5 * ((h_up_flux_val / hh_up) + (h_down_flux_val / hh_down))
                     abs_c_adv = abs(c_adv)
 
                     h_flux_val = 0.5 * (h_up_flux_val + h_down_flux_val) - ah * abs_c_adv * (hh_up - hh_down)
@@ -165,7 +166,7 @@ if njit is not None:
                         + ww_down * detadz_down[ey, ex, xi]
                     )
 
-                    adv_sign = 1.0 - 2.0 * (c_adv < 0.0)
+                    adv_sign = 1.0 - 2.0 * (c_adv_tangent < 0.0)
                     avg_tan_cov = 0.5 * (
                         u_cov_up_val + u_cov_down_val
                     ) - tangent_scale * adv_sign * (
@@ -235,6 +236,7 @@ if njit is not None:
                     inv_h_sum = 1.0 / h_sum
                     c_snd = 0.5 * (np.sqrt(g * hh_right) + np.sqrt(g * hh_left))
                     c_adv = (h_right_flux_val + h_left_flux_val) * inv_h_sum
+                    c_adv_tangent = 0.5 * ((h_right_flux_val / hh_right) + (h_left_flux_val / hh_left))
                     abs_c_adv = abs(c_adv)
 
                     h_flux_val = 0.5 * (h_right_flux_val + h_left_flux_val) - ah * abs_c_adv * (hh_right - hh_left)
@@ -273,7 +275,7 @@ if njit is not None:
                         + ww_left * detadz_left[ey, ex, eta]
                     )
 
-                    adv_sign = 1.0 - 2.0 * (c_adv < 0.0)
+                    adv_sign = 1.0 - 2.0 * (c_adv_tangent < 0.0)
                     avg_tan_cov = 0.5 * (
                         v_cov_right_val + v_cov_left_val
                     ) - tangent_scale * adv_sign * (

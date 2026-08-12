@@ -1858,8 +1858,10 @@ class DGCubedSphereFace:
         h_ve = 0.5 * (self.h_up + self.h_down)
         h_ho = 0.5 * (self.h_right + self.h_left)
 
-        c_adv_vert = 0.5 * (self.h_up * vel_up + self.h_down * vel_down) / h_ve #- self.g * self.ah * (self.h_up - self.h_down) / (c_snd_ve * h_ve)
-        c_adv_horz = 0.5 * (self.h_right * vel_right + self.h_left * vel_left) / h_ho #- self.g * self.ah * (self.h_right - self.h_left) / (c_snd_ho * h_ho)
+        c_adv_vert = 0.5 * (self.h_up * vel_up + self.h_down * vel_down) / h_ve
+        c_adv_horz = 0.5 * (self.h_right * vel_right + self.h_left * vel_left) / h_ho
+        c_adv_tangent_vert = 0.5 * (vel_up + vel_down)
+        c_adv_tangent_horz = 0.5 * (vel_right + vel_left)
 
         u_cov_up = self.u_up * self.dxdxi_up + self.v_up * self.dydxi_up + self.w_up * self.dzdxi_up
         u_cov_down = self.u_down * self.dxdxi_down + self.v_down * self.dydxi_down + self.w_down * self.dzdxi_down
@@ -1888,8 +1890,8 @@ class DGCubedSphereFace:
         uv_flux_vert = 0.5 * (uv_up_flux + uv_down_flux) - a * (c_snd_ve + abs(c_adv_vert)) * (h_up_flux - h_down_flux) / h_ve
 
         if tangent_diss:
-            u_cov_vert_avg = (c_adv_vert < 0) * u_cov_up + (c_adv_vert >= 0) * u_cov_down
-            v_cov_horz_avg = (c_adv_horz < 0) * v_cov_right + (c_adv_horz >= 0) * v_cov_left
+            u_cov_vert_avg = (c_adv_tangent_vert < 0) * u_cov_up + (c_adv_tangent_vert >= 0) * u_cov_down
+            v_cov_horz_avg = (c_adv_tangent_horz < 0) * v_cov_right + (c_adv_tangent_horz >= 0) * v_cov_left
         else:
             u_cov_vert_avg = 0.5 * (u_cov_up + u_cov_down)
             v_cov_horz_avg = 0.5 * (v_cov_right + v_cov_left)
