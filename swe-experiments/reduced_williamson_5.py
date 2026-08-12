@@ -21,7 +21,6 @@ else:
 
 cfl = 1.3
 h_diss = True
-flux_type = "barth_normal_tangent"
 
 if h_diss:
     ah = 0.5
@@ -34,6 +33,7 @@ parser.add_argument('--nx', type=int, help='Number of cells in horizontal')
 parser.add_argument('--plot', action='store_true')
 parser.add_argument('--restart', action='store_true')
 parser.add_argument('--day', type=int, help='Polynomial order')
+parser.add_argument('--flux_type', type=str, help='Flux type')
 args = parser.parse_args()
 
 if args.plot:
@@ -54,6 +54,7 @@ radius = 6.37122e6
 u_0 = 0.5
 h_0 = 5960.0
 s_0 = 3000
+flux_type = args.flux_type
 
 # max wave speed approx 20 towards later end of simulation
 # can be a bit higher though
