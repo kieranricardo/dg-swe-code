@@ -1476,7 +1476,7 @@ class DGCubedSphereFace:
         if h is None:
             h = self.h
 
-        self.boundaries(u, v, w, h, self.time)
+        DGCubedSphereFace.boundaries(self, u, v, w, h, self.time)
 
         u_cov, v_cov, _ = self.phys_to_cov(u, v, w)
         vort_cov = self.ddxi(v_cov) - self.ddeta(u_cov)
