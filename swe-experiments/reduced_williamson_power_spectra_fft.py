@@ -306,8 +306,16 @@ def main():
         energy_list.append(ke_spectrum)
         enstrophy_list.append(enstrophy_spectrum)
 
+    ke_spectrum = sum(energy_list) / len(energy_list)
+    enstrophy_spectrum = sum(enstrophy_list) / len(enstrophy_list)
+    
+    spectra_fp = os.path.join(data_dir, f'spectra.pkl')
+    print('Saving weights to:', spectra_fp)
+    with open(spectra_fp, 'wb') as file:
+        pickle.dump({'ke': ke_spectrum, 'enstrophy': enstrophy_spectrum}, file, pickle.HIGHEST_PROTOCOL)
+
     out_fp = os.path.join(plot_dir, f'spectra.png')
-    plot_spectra(sum(energy_list) / len(energy_list), sum(enstrophy_list) / len(enstrophy_list), out_fp)
+    plot_spectra(ke_spectrum, enstrophy_spectrum, out_fp)
 
 
 if __name__ == '__main__':
