@@ -3,7 +3,10 @@ import numpy as np
 
 from dg_swe.dg_cubed_sphere_swe import DGCubedSphereFace, DGCubedSphereSWE
 from dg_swe.tswe_numba_kernels import _solve_tswe_numba_kernel
-from dg_swe.utils import cross_product, to_numpy as _to_numpy
+from dg_swe.utils import to_numpy as _to_numpy
+
+
+VALID_TSWE_FLUX_TYPES = ("standard", "standard_tangent")
 
 
 class DGCubedSphereTSWE(DGCubedSphereSWE):
@@ -25,15 +28,22 @@ class DGCubedSphereTSWE(DGCubedSphereSWE):
         a=0.0,
         ah=0.0,
         dtype=np.float64,
-        flux_type="standard",
+        tangent_diss=False,
         upwind=False,
         nprocx=1,
         nprocy=1,
         comm=None,
         **kwargs,
     ):
-        if flux_type != "standard":
-            raise ValueError("DGCubedSphereTSWE currently supports flux_type='standard'.")
+        if tangent_diss:
+            flux_type = "standard_tangent"
+        else:
+            flux_type = "standard"
+
+        if flux_type not in VALID_TSWE_FLUX_TYPES:
+            raise ValueError(
+                f"flux_type: expected one of {VALID_TSWE_FLUX_TYPES}. Found {flux_type!r}."
+            )
 
         self.face_class = DGCubedSphereFaceTSWE
         super().__init__(
@@ -432,31 +442,6 @@ class DGCubedSphereFaceTSWE(DGCubedSphereFace):
         self.hb = None
         self.upwind = upwind
 
-        self.kx_up, self.kx_down = self.make_up_down_arrays(self.kx)
-        self.ky_up, self.ky_down = self.make_up_down_arrays(self.ky)
-        self.kz_up, self.kz_down = self.make_up_down_arrays(self.kz)
-        self.kx_right, self.kx_left = self.make_left_right_arrays(self.kx)
-        self.ky_right, self.ky_left = self.make_left_right_arrays(self.ky)
-        self.kz_right, self.kz_left = self.make_left_right_arrays(self.kz)
-
-        self.vert_upper_cov_factor = (
-            self.J_vertface[:, :, -1] / self.J_eta[:, :, -1]
-        ) / (self.J[:, :, -1] * self.endpoint_weight)
-        self.vert_lower_cov_factor = (
-            self.J_vertface[:, :, 0] / self.J_eta[:, :, 0]
-        ) / (self.J[:, :, 0] * self.endpoint_weight)
-        self.horz_right_cov_factor = (
-            self.J_horzface[:, :, :, -1] / self.J_xi[:, :, :, -1]
-        ) / (self.J[:, :, :, -1] * self.endpoint_weight)
-        self.horz_left_cov_factor = (
-            self.J_horzface[:, :, :, 0] / self.J_xi[:, :, :, 0]
-        ) / (self.J[:, :, :, 0] * self.endpoint_weight)
-
-        self.vert_upper_perp_factor = self.vert_upper_cov_factor / self.J[:, :, -1]
-        self.vert_lower_perp_factor = self.vert_lower_cov_factor / self.J[:, :, 0]
-        self.horz_right_perp_factor = self.horz_right_cov_factor / self.J[:, :, :, -1]
-        self.horz_left_perp_factor = self.horz_left_cov_factor / self.J[:, :, :, 0]
-
     def boundaries(self, u, v, w, h, hb, t):
         self.u_up[:-1] = u[:, :, 0, :]
         self.u_down[1:] = u[:, :, -1, :]
@@ -567,13 +552,17 @@ class DGCubedSphereFaceTSWE(DGCubedSphereFace):
             self.D, self.endpoint_weight, self.J,
             self.vert_upper_edge_factor, self.vert_lower_edge_factor,
             self.horz_right_edge_factor, self.horz_left_edge_factor,
-            self.vert_upper_cov_factor, self.vert_lower_cov_factor,
-            self.horz_right_cov_factor, self.horz_left_cov_factor,
-            self.vert_upper_perp_factor, self.vert_lower_perp_factor,
-            self.horz_right_perp_factor, self.horz_left_perp_factor,
             self.dxidx, self.dxidy, self.dxidz, self.detadx, self.detady, self.detadz,
+            self.dxidx_up, self.dxidy_up, self.dxidz_up,
+            self.dxidx_down, self.dxidy_down, self.dxidz_down,
+            self.dxidx_right, self.dxidy_right, self.dxidz_right,
+            self.dxidx_left, self.dxidy_left, self.dxidz_left,
+            self.detadx_up, self.detady_up, self.detadz_up,
+            self.detadx_down, self.detady_down, self.detadz_down,
+            self.detadx_right, self.detady_right, self.detadz_right,
+            self.detadx_left, self.detady_left, self.detadz_left,
             self.dxdxi, self.dydxi, self.dzdxi, self.dxdeta, self.dydeta, self.dzdeta,
-            self.kx, self.ky, self.kz, self.f,
+            self.f,
             self.u_up, self.v_up, self.w_up, self.h_up, self.hb_up,
             self.u_down, self.v_down, self.w_down, self.h_down, self.hb_down,
             self.u_right, self.v_right, self.w_right, self.h_right, self.hb_right,
@@ -590,11 +579,9 @@ class DGCubedSphereFaceTSWE(DGCubedSphereFace):
             self.dxdeta_down, self.dydeta_down, self.dzdeta_down,
             self.dxdeta_right, self.dydeta_right, self.dzdeta_right,
             self.dxdeta_left, self.dydeta_left, self.dzdeta_left,
-            self.kx_up, self.ky_up, self.kz_up,
-            self.kx_down, self.ky_down, self.kz_down,
-            self.kx_right, self.ky_right, self.kz_right,
-            self.kx_left, self.ky_left, self.kz_left,
-            self.g, self.a, self.upwind,
+            self.g, self.a, self.ah,
+            self.flux_type == "standard_tangent",
+            self.upwind,
         )
 
     def solve_numpy(self, u, v, w, h, hb, t, dt, *, verbose=False):
@@ -604,8 +591,10 @@ class DGCubedSphereFaceTSWE(DGCubedSphereFace):
 
         h_xflux, h_yflux, h_zflux = self.hflux(u, v, w, h)
         h_xflux, h_yflux = self.phys_to_contra(h_xflux, h_yflux, h_zflux)
-        div = (self.ddxi(h_xflux * self.J) + self.ddeta(h_yflux * self.J)) / self.J
-        h_k = -div
+        div = self.ddxi(h_xflux * self.J)
+        div += self.ddeta(h_yflux * self.J)
+        div /= self.J
+        h_out = -self.Jw * div
 
         hb_xflux, hb_yflux, hb_zflux = self.hbflux(u, v, w, hb)
         hb_xflux, hb_yflux = self.phys_to_contra(hb_xflux, hb_yflux, hb_zflux)
@@ -616,7 +605,9 @@ class DGCubedSphereFaceTSWE(DGCubedSphereFace):
         dhbdeta = self.ddeta(hb)
         dhdxi = self.ddxi(h)
         dhdeta = self.ddeta(h)
-        hb_k = -0.5 * (bdiv + b * div + dbdxi * h_xflux + dbdeta * h_yflux)
+        hb_out = -self.Jw * 0.5 * (
+            bdiv + b * div + dbdxi * h_xflux + dbdeta * h_yflux
+        )
 
         h_up_flux = self._normal_h_flux(self.u_up, self.v_up, self.w_up, self.h_up, self.eta_x_up, self.eta_y_up, self.eta_z_up)
         h_down_flux = self._normal_h_flux(self.u_down, self.v_down, self.w_down, self.h_down, self.eta_x_down, self.eta_y_down, self.eta_z_down)
@@ -628,13 +619,33 @@ class DGCubedSphereFaceTSWE(DGCubedSphereFace):
         hb_right_flux = self._normal_h_flux(self.u_right, self.v_right, self.w_right, self.hb_right, self.xi_x_right, self.xi_y_right, self.xi_z_right)
         hb_left_flux = self._normal_h_flux(self.u_left, self.v_left, self.w_left, self.hb_left, self.xi_x_left, self.xi_y_left, self.xi_z_left)
 
-        h_flux_vert = 0.5 * (h_up_flux + h_down_flux)
-        h_flux_horz = 0.5 * (h_right_flux + h_left_flux)
+        uv_up_flux = self.uv_flux(self.u_up, self.v_up, self.w_up, self.h_up, self.hb_up)
+        uv_down_flux = self.uv_flux(self.u_down, self.v_down, self.w_down, self.h_down, self.hb_down)
+        uv_right_flux = self.uv_flux(self.u_right, self.v_right, self.w_right, self.h_right, self.hb_right)
+        uv_left_flux = self.uv_flux(self.u_left, self.v_left, self.w_left, self.h_left, self.hb_left)
+
+        vel_up = h_up_flux / self.h_up
+        vel_down = h_down_flux / self.h_down
+        vel_right = h_right_flux / self.h_right
+        vel_left = h_left_flux / self.h_left
+
+        c_snd_ho = 0.5 * (np.sqrt(self.hb_right) + np.sqrt(self.hb_left))
+        c_snd_ve = 0.5 * (np.sqrt(self.hb_up) + np.sqrt(self.hb_down))
+        h_ve = 0.5 * (self.h_up + self.h_down)
+        h_ho = 0.5 * (self.h_right + self.h_left)
+
+        c_adv_vert = 0.5 * (self.h_up * vel_up + self.h_down * vel_down) / h_ve
+        c_adv_horz = 0.5 * (self.h_right * vel_right + self.h_left * vel_left) / h_ho
+        c_adv_tangent_vert = 0.5 * (vel_up + vel_down)
+        c_adv_tangent_horz = 0.5 * (vel_right + vel_left)
 
         b_up = self.hb_up / self.h_up
         b_down = self.hb_down / self.h_down
         b_right = self.hb_right / self.h_right
         b_left = self.hb_left / self.h_left
+
+        h_flux_vert = c_adv_vert * h_ve - self.ah * abs(c_adv_vert) * (self.h_up - self.h_down)
+        h_flux_horz = c_adv_horz * h_ho - self.ah * abs(c_adv_horz) * (self.h_right - self.h_left)
 
         if self.upwind:
             b_hat_ve = np.where(h_flux_vert >= 0.0, b_down, b_up)
@@ -643,65 +654,16 @@ class DGCubedSphereFaceTSWE(DGCubedSphereFace):
             b_hat_ve = 0.5 * (b_up + b_down)
             b_hat_ho = 0.5 * (b_right + b_left)
 
-        hb_flux_vert = b_hat_ve * h_flux_vert
-        hb_flux_horz = b_hat_ho * h_flux_horz
-
-        h_k[:, :, -1] -= (h_flux_vert[1:] - h_down_flux[1:]) * self.vert_upper_edge_factor
-        h_k[:, :, 0] += (h_flux_vert[:-1] - h_up_flux[:-1]) * self.vert_lower_edge_factor
-        h_k[:, :, :, -1] -= (h_flux_horz[:, 1:] - h_left_flux[:, 1:]) * self.horz_right_edge_factor
-        h_k[:, :, :, 0] += (h_flux_horz[:, :-1] - h_right_flux[:, :-1]) * self.horz_left_edge_factor
-
-        hb_k[:, :, -1] -= (hb_flux_vert[1:] - hb_down_flux[1:]) * self.vert_upper_edge_factor
-        hb_k[:, :, 0] += (hb_flux_vert[:-1] - hb_up_flux[:-1]) * self.vert_lower_edge_factor
-        hb_k[:, :, :, -1] -= (hb_flux_horz[:, 1:] - hb_left_flux[:, 1:]) * self.horz_right_edge_factor
-        hb_k[:, :, :, 0] += (hb_flux_horz[:, :-1] - hb_right_flux[:, :-1]) * self.horz_left_edge_factor
-
-        uv_flux = self.uv_flux(u, v, w, h, hb)
-        u_contra, v_contra = self.phys_to_contra(u, v, w)
-        u_cov, v_cov, _ = self.phys_to_cov(u, v, w)
-        vort = (self.ddxi(v_cov) - self.ddeta(u_cov)) / self.J + self.f
-
-        velocity_perp = cross_product([self.kx, self.ky, self.kz], [u, v, w])
-        u_perp, v_perp, _ = self.phys_to_cov(*velocity_perp)
-
-        u_k_cov = -self.ddxi(uv_flux) - vort * u_perp
-        u_k_cov -= 0.25 * (b * dhdxi + dhbdxi - h * dbdxi)
-        v_k_cov = -self.ddeta(uv_flux) - vort * v_perp
-        v_k_cov -= 0.25 * (b * dhdeta + dhbdeta - h * dbdeta)
-
-        uv_up_flux = self.uv_flux(self.u_up, self.v_up, self.w_up, self.h_up, self.hb_up)
-        uv_down_flux = self.uv_flux(self.u_down, self.v_down, self.w_down, self.h_down, self.hb_down)
-        uv_right_flux = self.uv_flux(self.u_right, self.v_right, self.w_right, self.h_right, self.hb_right)
-        uv_left_flux = self.uv_flux(self.u_left, self.v_left, self.w_left, self.h_left, self.hb_left)
-
-        c_ve = 0.5 * (
-            self.wave_speed(self.u_up, self.v_up, self.w_up, self.h_up, self.hb_up)
-            + self.wave_speed(self.u_down, self.v_down, self.w_down, self.h_down, self.hb_down)
-        )
-        c_ho = 0.5 * (
-            self.wave_speed(self.u_right, self.v_right, self.w_right, self.h_right, self.hb_right)
-            + self.wave_speed(self.u_left, self.v_left, self.w_left, self.h_left, self.hb_left)
-        )
-        uv_flux_vert = 0.5 * (uv_up_flux + uv_down_flux)
-        uv_flux_horz = 0.5 * (uv_right_flux + uv_left_flux)
-        if self.a != 0.0:
-            uv_flux_vert -= self.a * (self.g / c_ve) * (h_up_flux - h_down_flux)
-            uv_flux_horz -= self.a * (self.g / c_ho) * (h_right_flux - h_left_flux)
-
-        u_k_cov[:, :, :, -1] -= (uv_flux_horz[:, 1:] - uv_left_flux[:, 1:]) * self.horz_right_cov_factor
-        u_k_cov[:, :, :, 0] += (uv_flux_horz[:, :-1] - uv_right_flux[:, :-1]) * self.horz_left_cov_factor
-        u_k_cov[:, :, :, -1] -= 0.25 * b_hat_ho[:, 1:] * (self.h_right[:, 1:] - self.h_left[:, 1:]) * self.horz_right_cov_factor
-        u_k_cov[:, :, :, 0] += 0.25 * b_hat_ho[:, :-1] * (self.h_left[:, :-1] - self.h_right[:, :-1]) * self.horz_left_cov_factor
-
-        v_k_cov[:, :, -1] -= (uv_flux_vert[1:] - uv_down_flux[1:]) * self.vert_upper_cov_factor
-        v_k_cov[:, :, 0] += (uv_flux_vert[:-1] - uv_up_flux[:-1]) * self.vert_lower_cov_factor
-        v_k_cov[:, :, -1] -= 0.25 * b_hat_ve[1:] * (self.h_up[1:] - self.h_down[1:]) * self.vert_upper_cov_factor
-        v_k_cov[:, :, 0] += 0.25 * b_hat_ve[:-1] * (self.h_down[:-1] - self.h_up[:-1]) * self.vert_lower_cov_factor
-
-        # tangent work
+        uv_flux_horz = 0.5 * (uv_right_flux + uv_left_flux) - self.a * (
+            c_snd_ho + abs(c_adv_horz)
+        ) * (h_right_flux - h_left_flux) / h_ho
+        uv_flux_vert = 0.5 * (uv_up_flux + uv_down_flux) - self.a * (
+            c_snd_ve + abs(c_adv_vert)
+        ) * (h_up_flux - h_down_flux) / h_ve
 
         u_cov_up = self.u_up * self.dxdxi_up + self.v_up * self.dydxi_up + self.w_up * self.dzdxi_up
         u_cov_down = self.u_down * self.dxdxi_down + self.v_down * self.dydxi_down + self.w_down * self.dzdxi_down
+
         v_cov_right = self.u_right * self.dxdeta_right + self.v_right * self.dydeta_right + self.w_right * self.dzdeta_right
         v_cov_left = self.u_left * self.dxdeta_left + self.v_left * self.dydeta_left + self.w_left * self.dzdeta_left
 
@@ -715,8 +677,12 @@ class DGCubedSphereFaceTSWE(DGCubedSphereFace):
         v_contra_right = self.u_right * self.detadx_right + self.v_right * self.detady_right + self.w_right * self.detadz_right
         v_contra_left = self.u_left * self.detadx_left + self.v_left * self.detady_left + self.w_left * self.detadz_left
 
-        u_cov_vert_avg = 0.5 * (u_cov_up + u_cov_down)
-        v_cov_horz_avg = 0.5 * (v_cov_right + v_cov_left)
+        if self.flux_type == "standard_tangent":
+            u_cov_vert_avg = (c_adv_tangent_vert < 0) * u_cov_up + (c_adv_tangent_vert >= 0) * u_cov_down
+            v_cov_horz_avg = (c_adv_tangent_horz < 0) * v_cov_right + (c_adv_tangent_horz >= 0) * v_cov_left
+        else:
+            u_cov_vert_avg = 0.5 * (u_cov_up + u_cov_down)
+            v_cov_horz_avg = 0.5 * (v_cov_right + v_cov_left)
 
         u_flux_vert_up = v_contra_up * u_cov_vert_avg
         u_flux_vert_down = v_contra_down * u_cov_vert_avg
@@ -728,45 +694,73 @@ class DGCubedSphereFaceTSWE(DGCubedSphereFace):
         v_flux_horz_right = u_contra_right * v_cov_horz_avg
         v_flux_horz_left = u_contra_left * v_cov_horz_avg
 
-        # u_cov_up = self.u_up * self.dxdxi_up + self.v_up * self.dydxi_up + self.w_up * self.dzdxi_up
-        # u_cov_down = self.u_down * self.dxdxi_down + self.v_down * self.dydxi_down + self.w_down * self.dzdxi_down
-        # v_cov_right = self.u_right * self.dxdeta_right + self.v_right * self.dydeta_right + self.w_right * self.dzdeta_right
-        # v_cov_left = self.u_left * self.dxdeta_left + self.v_left * self.dydeta_left + self.w_left * self.dzdeta_left
-        #
-        # u_perp_up, v_perp_up = self._edge_perp_cov(self.kx_up, self.ky_up, self.kz_up, self.u_up, self.v_up, self.w_up, self.dxdxi_up, self.dydxi_up, self.dzdxi_up, self.dxdeta_up, self.dydeta_up, self.dzdeta_up)
-        # u_perp_down, v_perp_down = self._edge_perp_cov(self.kx_down, self.ky_down, self.kz_down, self.u_down, self.v_down, self.w_down, self.dxdxi_down, self.dydxi_down, self.dzdxi_down, self.dxdeta_down, self.dydeta_down, self.dzdeta_down)
-        # u_perp_right, v_perp_right = self._edge_perp_cov(self.kx_right, self.ky_right, self.kz_right, self.u_right, self.v_right, self.w_right, self.dxdxi_right, self.dydxi_right, self.dzdxi_right, self.dxdeta_right, self.dydeta_right, self.dzdeta_right)
-        # u_perp_left, v_perp_left = self._edge_perp_cov(self.kx_left, self.ky_left, self.kz_left, self.u_left, self.v_left, self.w_left, self.dxdxi_left, self.dydxi_left, self.dzdxi_left, self.dxdeta_left, self.dydeta_left, self.dzdeta_left)
-        #
-        # u_cov_jump = u_cov_up - u_cov_down
-        # v_cov_jump = v_cov_right - v_cov_left
-        #
-        # u_k_cov[:, :, -1] += 0.5 * u_perp_down[1:] * u_cov_jump[1:] * self.vert_upper_perp_factor
-        # u_k_cov[:, :, 0] += 0.5 * u_perp_up[:-1] * u_cov_jump[:-1] * self.vert_lower_perp_factor
-        #
-        # u_k_cov[:, :, :, -1] -= 0.5 * u_perp_left[:, 1:] * v_cov_jump[:, 1:] * self.horz_right_perp_factor
-        # u_k_cov[:, :, :, 0] -= 0.5 * u_perp_right[:, :-1] * v_cov_jump[:, :-1] * self.horz_left_perp_factor
-        #
-        # v_k_cov[:, :, -1] += 0.5 * v_perp_down[1:] * u_cov_jump[1:] * self.vert_upper_perp_factor
-        # v_k_cov[:, :, 0] += 0.5 * v_perp_up[:-1] * u_cov_jump[:-1] * self.vert_lower_perp_factor
-        # v_k_cov[:, :, :, -1] -= 0.5 * v_perp_left[:, 1:] * v_cov_jump[:, 1:] * self.horz_right_perp_factor
-        # v_k_cov[:, :, :, 0] -= 0.5 * v_perp_right[:, :-1] * v_cov_jump[:, :-1] * self.horz_left_perp_factor
+        self.tmp1[:, :, -1] = (h_flux_vert[1:] - h_down_flux[1:]) * (self.weights_x * self.J_vertface[:, :, -1])
+        self.tmp1[:, :, 0] = -(h_flux_vert[:-1] - h_up_flux[:-1]) * (self.weights_x * self.J_vertface[:, :, 0])
+        self.tmp2[:, :, :, -1] = (h_flux_horz[:, 1:] - h_left_flux[:, 1:]) * (self.weights_x * self.J_horzface[..., -1])
+        self.tmp2[:, :, :, 0] = -(h_flux_horz[:, :-1] - h_right_flux[:, :-1]) * (
+            self.weights_x * self.J_horzface[..., 0]
+        )
+        h_out -= self.tmp1 + self.tmp2
+        h_k = h_out / self.Jw
 
-        u_k, v_k, w_k = self.cov_to_phys(u_k_cov, v_k_cov, 0)
+        hb_flux_vert = b_hat_ve * h_flux_vert
+        hb_flux_horz = b_hat_ho * h_flux_horz
+        self.tmp1[:, :, -1] = (hb_flux_vert[1:] - hb_down_flux[1:]) * (self.weights_x * self.J_vertface[:, :, -1])
+        self.tmp1[:, :, 0] = -(hb_flux_vert[:-1] - hb_up_flux[:-1]) * (self.weights_x * self.J_vertface[:, :, 0])
+        self.tmp2[:, :, :, -1] = (hb_flux_horz[:, 1:] - hb_left_flux[:, 1:]) * (self.weights_x * self.J_horzface[..., -1])
+        self.tmp2[:, :, :, 0] = -(hb_flux_horz[:, :-1] - hb_right_flux[:, :-1]) * (
+            self.weights_x * self.J_horzface[..., 0]
+        )
+        hb_out -= self.tmp1 + self.tmp2
+        hb_k = hb_out / self.Jw
+
+        uv_flux = self.uv_flux(u, v, w, h, hb)
+        u_contra, v_contra = self.phys_to_contra(u, v, w)
+        u_cov, v_cov, _ = self.phys_to_cov(u, v, w)
+        abs_vort_cov = self.ddxi(v_cov)
+        abs_vort_cov += -self.ddeta(u_cov)
+        abs_vort_cov += self.f * self.J
+
+        wx = self.endpoint_weight
+
+        u_k = -self.ddxi(uv_flux)
+        u_k += v_contra * abs_vort_cov
+        u_k -= 0.25 * (b * dhdxi + dhbdxi - h * dbdxi)
+        u_k[:, :, -1] -= (u_flux_vert_down[1:] - (v_contra_down * u_cov_down)[1:]) / wx
+        u_k[:, :, 0] += (u_flux_vert_up[:-1] - (v_contra_up * u_cov_up)[:-1]) / wx
+        u_k[:, :, :, -1] -= (
+            u_flux_horz_left[:, 1:] - (uv_left_flux - v_contra_left * v_cov_left)[:, 1:]
+        ) / wx
+        u_k[:, :, :, 0] += (
+            u_flux_horz_right[:, :-1] - (uv_right_flux - v_contra_right * v_cov_right)[:, :-1]
+        ) / wx
+        u_k[:, :, :, -1] -= 0.25 * b_hat_ho[:, 1:] * (self.h_right[:, 1:] - self.h_left[:, 1:]) / wx
+        u_k[:, :, :, 0] += 0.25 * b_hat_ho[:, :-1] * (self.h_left[:, :-1] - self.h_right[:, :-1]) / wx
+
+        v_k = -self.ddeta(uv_flux)
+        v_k += -u_contra * abs_vort_cov
+        v_k -= 0.25 * (b * dhdeta + dhbdeta - h * dbdeta)
+        v_k[:, :, -1] -= (
+            v_flux_vert_down[1:] - (uv_down_flux - u_contra_down * u_cov_down)[1:]
+        ) / wx
+        v_k[:, :, 0] += (
+            v_flux_vert_up[:-1] - (uv_up_flux - u_contra_up * u_cov_up)[:-1]
+        ) / wx
+        v_k[:, :, :, -1] -= (
+            v_flux_horz_left[:, 1:] - (u_contra_left * v_cov_left)[:, 1:]
+        ) / wx
+        v_k[:, :, :, 0] += (
+            v_flux_horz_right[:, :-1] - (u_contra_right * v_cov_right)[:, :-1]
+        ) / wx
+        v_k[:, :, -1] -= 0.25 * b_hat_ve[1:] * (self.h_up[1:] - self.h_down[1:]) / wx
+        v_k[:, :, 0] += 0.25 * b_hat_ve[:-1] * (self.h_down[:-1] - self.h_up[:-1]) / wx
+
+        u_k, v_k, w_k = self.cov_to_phys(u_k, v_k, 0)
         return u_k, v_k, w_k, h_k, hb_k
 
     @staticmethod
     def _normal_h_flux(u, v, w, h, nx, ny, nz):
         return h * (u * nx + v * ny + w * nz)
-
-    @staticmethod
-    def _edge_perp_cov(kx, ky, kz, u, v, w, dxdxi, dydxi, dzdxi, dxdeta, dydeta, dzdeta):
-        px = ky * w - kz * v
-        py = kz * u - kx * w
-        pz = kx * v - ky * u
-        u_perp = px * dxdxi + py * dydxi + pz * dzdxi
-        v_perp = px * dxdeta + py * dydeta + pz * dzdeta
-        return u_perp, v_perp
 
     def tracer_variance(self, u=None, v=None, w=None, h=None, hb=None):
         if h is None:

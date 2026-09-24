@@ -90,13 +90,16 @@ def initial_condition(face):
     return u, v, w, h, hb
 
 
-def get_fn_template(a, ah, upwind, day=None):
+def get_fn_template(a, ah, upwind, tangent_diss, day=None):
     suffix = ''
 
     suffix = suffix + f'a_{a}'
     suffix = suffix + f'_ah_{ah}'
     if upwind:
         suffix = suffix + "_upwind"
+
+    if tangent_diss:
+        suffix = suffix + "_tangent_diss"
 
     if day is not None:
         suffix = suffix + f'_day_{day}'
@@ -105,7 +108,7 @@ def get_fn_template(a, ah, upwind, day=None):
 
 
 parameters_list = [
-    dict(a=0.5, upwind=True, ah=0.0),
+    dict(a=0.5, upwind=True, ah=0.0, tangent_diss=True),
 ]
 
 if mode == 'run':
@@ -126,7 +129,8 @@ if mode == 'run':
             nprocx=nprocx, nprocy=nprocy,
             a=parameters['a'],
             upwind=parameters['upwind'],
-            ah=parameters['ah']
+            ah=parameters['ah'],
+            tangent_diss=parameters['tangent_diss']
         )
 
         for face in solver.faces.values():
@@ -140,6 +144,7 @@ if mode == 'run':
             print('Starting', get_fn_template(**parameters))
             print('a:', solver.faces['zp'].a, 'res:', nx, ny)
             print('ah:', solver.faces['zp'].ah, 'upwind:', solver.faces['zp'].upwind)
+            print('flux type:', solver.faces['zp'].flux_type)
 
         for i in range(20):
             if rank == 0:

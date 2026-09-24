@@ -13,26 +13,34 @@ if njit is not None:
         D, endpoint_weight, J,
         vert_upper_edge_factor, vert_lower_edge_factor,
         horz_right_edge_factor, horz_left_edge_factor,
-        vert_upper_cov_factor, vert_lower_cov_factor,
-        horz_right_cov_factor, horz_left_cov_factor,
-        vert_upper_perp_factor, vert_lower_perp_factor,
-        horz_right_perp_factor, horz_left_perp_factor,
         dxidx, dxidy, dxidz, detadx, detady, detadz,
+        dxidx_up, dxidy_up, dxidz_up,
+        dxidx_down, dxidy_down, dxidz_down,
+        dxidx_right, dxidy_right, dxidz_right,
+        dxidx_left, dxidy_left, dxidz_left,
+        detadx_up, detady_up, detadz_up,
+        detadx_down, detady_down, detadz_down,
+        detadx_right, detady_right, detadz_right,
+        detadx_left, detady_left, detadz_left,
         dxdxi, dydxi, dzdxi, dxdeta, dydeta, dzdeta,
-        kx, ky, kz, f,
+        f,
         u_up, v_up, w_up, h_up, hb_up,
         u_down, v_down, w_down, h_down, hb_down,
         u_right, v_right, w_right, h_right, hb_right,
         u_left, v_left, w_left, h_left, hb_left,
-        eta_x_up, eta_y_up, eta_z_up, eta_x_down, eta_y_down, eta_z_down,
-        xi_x_right, xi_y_right, xi_z_right, xi_x_left, xi_y_left, xi_z_left,
-        dxdxi_up, dydxi_up, dzdxi_up, dxdxi_down, dydxi_down, dzdxi_down,
-        dxdxi_right, dydxi_right, dzdxi_right, dxdxi_left, dydxi_left, dzdxi_left,
-        dxdeta_up, dydeta_up, dzdeta_up, dxdeta_down, dydeta_down, dzdeta_down,
-        dxdeta_right, dydeta_right, dzdeta_right, dxdeta_left, dydeta_left, dzdeta_left,
-        kx_up, ky_up, kz_up, kx_down, ky_down, kz_down,
-        kx_right, ky_right, kz_right, kx_left, ky_left, kz_left,
-        g, a, upwind,
+        eta_x_up, eta_y_up, eta_z_up,
+        eta_x_down, eta_y_down, eta_z_down,
+        xi_x_right, xi_y_right, xi_z_right,
+        xi_x_left, xi_y_left, xi_z_left,
+        dxdxi_up, dydxi_up, dzdxi_up,
+        dxdxi_down, dydxi_down, dzdxi_down,
+        dxdxi_right, dydxi_right, dzdxi_right,
+        dxdxi_left, dydxi_left, dzdxi_left,
+        dxdeta_up, dydeta_up, dzdeta_up,
+        dxdeta_down, dydeta_down, dzdeta_down,
+        dxdeta_right, dydeta_right, dzdeta_right,
+        dxdeta_left, dydeta_left, dzdeta_left,
+        g, a, ah, tangent_diss, upwind,
     ):
         ny, nx, n, _ = u.shape
 
@@ -48,13 +56,13 @@ if njit is not None:
         v_contra = np.empty_like(u)
         u_cov = np.empty_like(u)
         v_cov = np.empty_like(u)
-        u_perp = np.empty_like(u)
-        v_perp = np.empty_like(u)
 
         h_k = np.empty_like(u)
         hb_k = np.empty_like(u)
         u_k_cov = np.empty_like(u)
         v_k_cov = np.empty_like(u)
+
+        inv_endpoint_weight = 1.0 / endpoint_weight
 
         for ey in range(ny):
             for ex in range(nx):
@@ -90,36 +98,18 @@ if njit is not None:
                         hb_ycontra_J[ey, ex, eta, xi] = hhb * vc * j_val
 
                         b[ey, ex, eta, xi] = hhb / hh
-                        uv_flux[ey, ex, eta, xi] = 0.5 * (uu * uu + vv * vv + ww * ww) + 0.5 * hhb
-
-                        ucov = (
+                        uv_flux[ey, ex, eta, xi] = (
+                            0.5 * (uu * uu + vv * vv + ww * ww) + 0.5 * hhb
+                        )
+                        u_cov[ey, ex, eta, xi] = (
                             uu * dxdxi[ey, ex, eta, xi]
                             + vv * dydxi[ey, ex, eta, xi]
                             + ww * dzdxi[ey, ex, eta, xi]
                         )
-                        vcov = (
+                        v_cov[ey, ex, eta, xi] = (
                             uu * dxdeta[ey, ex, eta, xi]
                             + vv * dydeta[ey, ex, eta, xi]
                             + ww * dzdeta[ey, ex, eta, xi]
-                        )
-                        u_cov[ey, ex, eta, xi] = ucov
-                        v_cov[ey, ex, eta, xi] = vcov
-
-                        kxx = kx[ey, ex, eta, xi]
-                        kyy = ky[ey, ex, eta, xi]
-                        kzz = kz[ey, ex, eta, xi]
-                        px = kyy * ww - kzz * vv
-                        py = kzz * uu - kxx * ww
-                        pz = kxx * vv - kyy * uu
-                        u_perp[ey, ex, eta, xi] = (
-                            px * dxdxi[ey, ex, eta, xi]
-                            + py * dydxi[ey, ex, eta, xi]
-                            + pz * dzdxi[ey, ex, eta, xi]
-                        )
-                        v_perp[ey, ex, eta, xi] = (
-                            px * dxdeta[ey, ex, eta, xi]
-                            + py * dydeta[ey, ex, eta, xi]
-                            + pz * dzdeta[ey, ex, eta, xi]
                         )
 
         for ey in range(ny):
@@ -172,17 +162,19 @@ if njit is not None:
                             + ddeta_b * h_ycontra[ey, ex, eta, xi]
                         )
 
-                        vort = (ddxi_vcov - ddeta_ucov) / j_val + f[ey, ex, eta, xi]
+                        abs_vort_cov = (
+                            ddxi_vcov - ddeta_ucov + f[ey, ex, eta, xi] * j_val
+                        )
                         u_k_cov[ey, ex, eta, xi] = (
                             -ddxi_uv
-                            - vort * u_perp[ey, ex, eta, xi]
+                            + v_contra[ey, ex, eta, xi] * abs_vort_cov
                             - 0.25 * (
                                 bb * ddxi_plain_h + ddxi_plain_hb - hh * ddxi_b
                             )
                         )
                         v_k_cov[ey, ex, eta, xi] = (
                             -ddeta_uv
-                            - vort * v_perp[ey, ex, eta, xi]
+                            - u_contra[ey, ex, eta, xi] * abs_vort_cov
                             - 0.25 * (
                                 bb * ddeta_plain_h + ddeta_plain_hb - hh * ddeta_b
                             )
@@ -223,85 +215,96 @@ if njit is not None:
                         + ww_down * eta_z_down[ey, ex, xi]
                     )
 
-                    h_flux = 0.5 * (h_up_flux + h_down_flux)
-                    b_up = hhb_up / hh_up
-                    b_down = hhb_down / hh_down
-                    b_hat = 0.5 * (b_up + b_down)
+                    vel_up = h_up_flux / hh_up
+                    vel_down = h_down_flux / hh_down
+                    h_ve = 0.5 * (hh_up + hh_down)
+                    c_adv = 0.5 * (hh_up * vel_up + hh_down * vel_down) / h_ve
+                    c_adv_tangent = 0.5 * (vel_up + vel_down)
+                    c_snd = 0.5 * (np.sqrt(hhb_up) + np.sqrt(hhb_down))
+
+                    h_flux = c_adv * h_ve - ah * abs(c_adv) * (hh_up - hh_down)
+                    b_up_val = hhb_up / hh_up
+                    b_down_val = hhb_down / hh_down
+                    b_hat = 0.5 * (b_up_val + b_down_val)
                     if upwind:
                         if h_flux >= 0.0:
-                            b_hat = b_down
+                            b_hat = b_down_val
                         else:
-                            b_hat = b_up
+                            b_hat = b_up_val
                     hb_flux = b_hat * h_flux
 
-                    uv_up_flux = 0.5 * (uu_up * uu_up + vv_up * vv_up + ww_up * ww_up) + 0.5 * hhb_up
-                    uv_down_flux = 0.5 * (uu_down * uu_down + vv_down * vv_down + ww_down * ww_down) + 0.5 * hhb_down
-                    c_up = np.sqrt(uu_up * uu_up + vv_up * vv_up + ww_up * ww_up) + np.sqrt(hhb_up)
-                    c_down = np.sqrt(uu_down * uu_down + vv_down * vv_down + ww_down * ww_down) + np.sqrt(hhb_down)
-                    c_avg = 0.5 * (c_up + c_down)
-                    uv_flux_edge = 0.5 * (uv_up_flux + uv_down_flux)
-                    if a != 0.0:
-                        uv_flux_edge -= a * (g / c_avg) * (h_up_flux - h_down_flux)
+                    uv_up_flux = (
+                        0.5 * (uu_up * uu_up + vv_up * vv_up + ww_up * ww_up)
+                        + 0.5 * hhb_up
+                    )
+                    uv_down_flux = (
+                        0.5 * (uu_down * uu_down + vv_down * vv_down + ww_down * ww_down)
+                        + 0.5 * hhb_down
+                    )
+                    uv_flux_edge = 0.5 * (uv_up_flux + uv_down_flux) - a * (
+                        c_snd + abs(c_adv)
+                    ) * (h_up_flux - h_down_flux) / h_ve
 
-                    u_cov_up = (
+                    u_cov_up_val = (
                         uu_up * dxdxi_up[ey, ex, xi]
                         + vv_up * dydxi_up[ey, ex, xi]
                         + ww_up * dzdxi_up[ey, ex, xi]
                     )
-                    u_cov_down = (
+                    u_cov_down_val = (
                         uu_down * dxdxi_down[ey, ex, xi]
                         + vv_down * dydxi_down[ey, ex, xi]
                         + ww_down * dzdxi_down[ey, ex, xi]
                     )
-                    u_cov_jump = u_cov_up - u_cov_down
+                    u_contra_up_val = (
+                        uu_up * dxidx_up[ey, ex, xi]
+                        + vv_up * dxidy_up[ey, ex, xi]
+                        + ww_up * dxidz_up[ey, ex, xi]
+                    )
+                    u_contra_down_val = (
+                        uu_down * dxidx_down[ey, ex, xi]
+                        + vv_down * dxidy_down[ey, ex, xi]
+                        + ww_down * dxidz_down[ey, ex, xi]
+                    )
+                    v_contra_up_val = (
+                        uu_up * detadx_up[ey, ex, xi]
+                        + vv_up * detady_up[ey, ex, xi]
+                        + ww_up * detadz_up[ey, ex, xi]
+                    )
+                    v_contra_down_val = (
+                        uu_down * detadx_down[ey, ex, xi]
+                        + vv_down * detady_down[ey, ex, xi]
+                        + ww_down * detadz_down[ey, ex, xi]
+                    )
 
-                    px_up = ky_up[ey, ex, xi] * ww_up - kz_up[ey, ex, xi] * vv_up
-                    py_up = kz_up[ey, ex, xi] * uu_up - kx_up[ey, ex, xi] * ww_up
-                    pz_up = kx_up[ey, ex, xi] * vv_up - ky_up[ey, ex, xi] * uu_up
-                    px_down = ky_down[ey, ex, xi] * ww_down - kz_down[ey, ex, xi] * vv_down
-                    py_down = kz_down[ey, ex, xi] * uu_down - kx_down[ey, ex, xi] * ww_down
-                    pz_down = kx_down[ey, ex, xi] * vv_down - ky_down[ey, ex, xi] * uu_down
-                    u_perp_up = (
-                        px_up * dxdxi_up[ey, ex, xi]
-                        + py_up * dydxi_up[ey, ex, xi]
-                        + pz_up * dzdxi_up[ey, ex, xi]
-                    )
-                    v_perp_up = (
-                        px_up * dxdeta_up[ey, ex, xi]
-                        + py_up * dydeta_up[ey, ex, xi]
-                        + pz_up * dzdeta_up[ey, ex, xi]
-                    )
-                    u_perp_down = (
-                        px_down * dxdxi_down[ey, ex, xi]
-                        + py_down * dydxi_down[ey, ex, xi]
-                        + pz_down * dzdxi_down[ey, ex, xi]
-                    )
-                    v_perp_down = (
-                        px_down * dxdeta_down[ey, ex, xi]
-                        + py_down * dydeta_down[ey, ex, xi]
-                        + pz_down * dzdeta_down[ey, ex, xi]
-                    )
+                    avg_tan_cov = 0.5 * (u_cov_up_val + u_cov_down_val)
+                    if tangent_diss:
+                        if c_adv_tangent < 0.0:
+                            avg_tan_cov = u_cov_up_val
+                        else:
+                            avg_tan_cov = u_cov_down_val
+
+                    u_flux_up = v_contra_up_val * avg_tan_cov
+                    u_flux_down = v_contra_down_val * avg_tan_cov
+                    v_flux_up = uv_flux_edge - u_contra_up_val * avg_tan_cov
+                    v_flux_down = uv_flux_edge - u_contra_down_val * avg_tan_cov
 
                     if ey > 0:
-                        cy = ey - 1
-                        h_k[cy, ex, n - 1, xi] -= (
+                        cell_y = ey - 1
+                        h_k[cell_y, ex, n - 1, xi] -= (
                             h_flux - h_down_flux
-                        ) * vert_upper_edge_factor[cy, ex, xi]
-                        hb_k[cy, ex, n - 1, xi] -= (
+                        ) * vert_upper_edge_factor[cell_y, ex, xi]
+                        hb_k[cell_y, ex, n - 1, xi] -= (
                             hb_flux - hb_down_flux
-                        ) * vert_upper_edge_factor[cy, ex, xi]
-                        u_k_cov[cy, ex, n - 1, xi] += (
-                            0.5 * u_perp_down * u_cov_jump
-                        ) * vert_upper_perp_factor[cy, ex, xi]
-                        v_k_cov[cy, ex, n - 1, xi] -= (
-                            uv_flux_edge - uv_down_flux
-                        ) * vert_upper_cov_factor[cy, ex, xi]
-                        v_k_cov[cy, ex, n - 1, xi] += (
-                            0.5 * v_perp_down * u_cov_jump
-                        ) * vert_upper_perp_factor[cy, ex, xi]
-                        v_k_cov[cy, ex, n - 1, xi] -= (
+                        ) * vert_upper_edge_factor[cell_y, ex, xi]
+                        u_k_cov[cell_y, ex, n - 1, xi] -= (
+                            u_flux_down - v_contra_down_val * u_cov_down_val
+                        ) * inv_endpoint_weight
+                        v_k_cov[cell_y, ex, n - 1, xi] -= (
+                            v_flux_down - (uv_down_flux - u_contra_down_val * u_cov_down_val)
+                        ) * inv_endpoint_weight
+                        v_k_cov[cell_y, ex, n - 1, xi] -= (
                             0.25 * b_hat * (hh_up - hh_down)
-                        ) * vert_upper_cov_factor[cy, ex, xi]
+                        ) * inv_endpoint_weight
 
                     if ey < ny:
                         h_k[ey, ex, 0, xi] += (
@@ -311,17 +314,14 @@ if njit is not None:
                             hb_flux - hb_up_flux
                         ) * vert_lower_edge_factor[ey, ex, xi]
                         u_k_cov[ey, ex, 0, xi] += (
-                            0.5 * u_perp_up * u_cov_jump
-                        ) * vert_lower_perp_factor[ey, ex, xi]
+                            u_flux_up - v_contra_up_val * u_cov_up_val
+                        ) * inv_endpoint_weight
                         v_k_cov[ey, ex, 0, xi] += (
-                            uv_flux_edge - uv_up_flux
-                        ) * vert_lower_cov_factor[ey, ex, xi]
-                        v_k_cov[ey, ex, 0, xi] += (
-                            0.5 * v_perp_up * u_cov_jump
-                        ) * vert_lower_perp_factor[ey, ex, xi]
+                            v_flux_up - (uv_up_flux - u_contra_up_val * u_cov_up_val)
+                        ) * inv_endpoint_weight
                         v_k_cov[ey, ex, 0, xi] += (
                             0.25 * b_hat * (hh_down - hh_up)
-                        ) * vert_lower_cov_factor[ey, ex, xi]
+                        ) * inv_endpoint_weight
 
         for ey in range(ny):
             for ex in range(nx + 1):
@@ -358,85 +358,96 @@ if njit is not None:
                         + ww_left * xi_z_left[ey, ex, eta]
                     )
 
-                    h_flux = 0.5 * (h_right_flux + h_left_flux)
-                    b_right = hhb_right / hh_right
-                    b_left = hhb_left / hh_left
-                    b_hat = 0.5 * (b_right + b_left)
+                    vel_right = h_right_flux / hh_right
+                    vel_left = h_left_flux / hh_left
+                    h_ho = 0.5 * (hh_right + hh_left)
+                    c_adv = 0.5 * (hh_right * vel_right + hh_left * vel_left) / h_ho
+                    c_adv_tangent = 0.5 * (vel_right + vel_left)
+                    c_snd = 0.5 * (np.sqrt(hhb_right) + np.sqrt(hhb_left))
+
+                    h_flux = c_adv * h_ho - ah * abs(c_adv) * (hh_right - hh_left)
+                    b_right_val = hhb_right / hh_right
+                    b_left_val = hhb_left / hh_left
+                    b_hat = 0.5 * (b_right_val + b_left_val)
                     if upwind:
                         if h_flux >= 0.0:
-                            b_hat = b_left
+                            b_hat = b_left_val
                         else:
-                            b_hat = b_right
+                            b_hat = b_right_val
                     hb_flux = b_hat * h_flux
 
-                    uv_right_flux = 0.5 * (uu_right * uu_right + vv_right * vv_right + ww_right * ww_right) + 0.5 * hhb_right
-                    uv_left_flux = 0.5 * (uu_left * uu_left + vv_left * vv_left + ww_left * ww_left) + 0.5 * hhb_left
-                    c_right = np.sqrt(uu_right * uu_right + vv_right * vv_right + ww_right * ww_right) + np.sqrt(hhb_right)
-                    c_left = np.sqrt(uu_left * uu_left + vv_left * vv_left + ww_left * ww_left) + np.sqrt(hhb_left)
-                    c_avg = 0.5 * (c_right + c_left)
-                    uv_flux_edge = 0.5 * (uv_right_flux + uv_left_flux)
-                    if a != 0.0:
-                        uv_flux_edge -= a * (g / c_avg) * (h_right_flux - h_left_flux)
+                    uv_right_flux = (
+                        0.5 * (uu_right * uu_right + vv_right * vv_right + ww_right * ww_right)
+                        + 0.5 * hhb_right
+                    )
+                    uv_left_flux = (
+                        0.5 * (uu_left * uu_left + vv_left * vv_left + ww_left * ww_left)
+                        + 0.5 * hhb_left
+                    )
+                    uv_flux_edge = 0.5 * (uv_right_flux + uv_left_flux) - a * (
+                        c_snd + abs(c_adv)
+                    ) * (h_right_flux - h_left_flux) / h_ho
 
-                    v_cov_right = (
+                    v_cov_right_val = (
                         uu_right * dxdeta_right[ey, ex, eta]
                         + vv_right * dydeta_right[ey, ex, eta]
                         + ww_right * dzdeta_right[ey, ex, eta]
                     )
-                    v_cov_left = (
+                    v_cov_left_val = (
                         uu_left * dxdeta_left[ey, ex, eta]
                         + vv_left * dydeta_left[ey, ex, eta]
                         + ww_left * dzdeta_left[ey, ex, eta]
                     )
-                    v_cov_jump = v_cov_right - v_cov_left
+                    u_contra_right_val = (
+                        uu_right * dxidx_right[ey, ex, eta]
+                        + vv_right * dxidy_right[ey, ex, eta]
+                        + ww_right * dxidz_right[ey, ex, eta]
+                    )
+                    u_contra_left_val = (
+                        uu_left * dxidx_left[ey, ex, eta]
+                        + vv_left * dxidy_left[ey, ex, eta]
+                        + ww_left * dxidz_left[ey, ex, eta]
+                    )
+                    v_contra_right_val = (
+                        uu_right * detadx_right[ey, ex, eta]
+                        + vv_right * detady_right[ey, ex, eta]
+                        + ww_right * detadz_right[ey, ex, eta]
+                    )
+                    v_contra_left_val = (
+                        uu_left * detadx_left[ey, ex, eta]
+                        + vv_left * detady_left[ey, ex, eta]
+                        + ww_left * detadz_left[ey, ex, eta]
+                    )
 
-                    px_right = ky_right[ey, ex, eta] * ww_right - kz_right[ey, ex, eta] * vv_right
-                    py_right = kz_right[ey, ex, eta] * uu_right - kx_right[ey, ex, eta] * ww_right
-                    pz_right = kx_right[ey, ex, eta] * vv_right - ky_right[ey, ex, eta] * uu_right
-                    px_left = ky_left[ey, ex, eta] * ww_left - kz_left[ey, ex, eta] * vv_left
-                    py_left = kz_left[ey, ex, eta] * uu_left - kx_left[ey, ex, eta] * ww_left
-                    pz_left = kx_left[ey, ex, eta] * vv_left - ky_left[ey, ex, eta] * uu_left
-                    u_perp_right = (
-                        px_right * dxdxi_right[ey, ex, eta]
-                        + py_right * dydxi_right[ey, ex, eta]
-                        + pz_right * dzdxi_right[ey, ex, eta]
-                    )
-                    v_perp_right = (
-                        px_right * dxdeta_right[ey, ex, eta]
-                        + py_right * dydeta_right[ey, ex, eta]
-                        + pz_right * dzdeta_right[ey, ex, eta]
-                    )
-                    u_perp_left = (
-                        px_left * dxdxi_left[ey, ex, eta]
-                        + py_left * dydxi_left[ey, ex, eta]
-                        + pz_left * dzdxi_left[ey, ex, eta]
-                    )
-                    v_perp_left = (
-                        px_left * dxdeta_left[ey, ex, eta]
-                        + py_left * dydeta_left[ey, ex, eta]
-                        + pz_left * dzdeta_left[ey, ex, eta]
-                    )
+                    avg_tan_cov = 0.5 * (v_cov_right_val + v_cov_left_val)
+                    if tangent_diss:
+                        if c_adv_tangent < 0.0:
+                            avg_tan_cov = v_cov_right_val
+                        else:
+                            avg_tan_cov = v_cov_left_val
+
+                    u_flux_right = uv_flux_edge - v_contra_right_val * avg_tan_cov
+                    u_flux_left = uv_flux_edge - v_contra_left_val * avg_tan_cov
+                    v_flux_right = u_contra_right_val * avg_tan_cov
+                    v_flux_left = u_contra_left_val * avg_tan_cov
 
                     if ex > 0:
-                        cx = ex - 1
-                        h_k[ey, cx, eta, n - 1] -= (
+                        cell_x = ex - 1
+                        h_k[ey, cell_x, eta, n - 1] -= (
                             h_flux - h_left_flux
-                        ) * horz_right_edge_factor[ey, cx, eta]
-                        hb_k[ey, cx, eta, n - 1] -= (
+                        ) * horz_right_edge_factor[ey, cell_x, eta]
+                        hb_k[ey, cell_x, eta, n - 1] -= (
                             hb_flux - hb_left_flux
-                        ) * horz_right_edge_factor[ey, cx, eta]
-                        u_k_cov[ey, cx, eta, n - 1] -= (
-                            uv_flux_edge - uv_left_flux
-                        ) * horz_right_cov_factor[ey, cx, eta]
-                        u_k_cov[ey, cx, eta, n - 1] -= (
-                            0.5 * u_perp_left * v_cov_jump
-                        ) * horz_right_perp_factor[ey, cx, eta]
-                        u_k_cov[ey, cx, eta, n - 1] -= (
+                        ) * horz_right_edge_factor[ey, cell_x, eta]
+                        u_k_cov[ey, cell_x, eta, n - 1] -= (
+                            u_flux_left - (uv_left_flux - v_contra_left_val * v_cov_left_val)
+                        ) * inv_endpoint_weight
+                        v_k_cov[ey, cell_x, eta, n - 1] -= (
+                            v_flux_left - u_contra_left_val * v_cov_left_val
+                        ) * inv_endpoint_weight
+                        u_k_cov[ey, cell_x, eta, n - 1] -= (
                             0.25 * b_hat * (hh_right - hh_left)
-                        ) * horz_right_cov_factor[ey, cx, eta]
-                        v_k_cov[ey, cx, eta, n - 1] -= (
-                            0.5 * v_perp_left * v_cov_jump
-                        ) * horz_right_perp_factor[ey, cx, eta]
+                        ) * inv_endpoint_weight
 
                     if ex < nx:
                         h_k[ey, ex, eta, 0] += (
@@ -446,17 +457,14 @@ if njit is not None:
                             hb_flux - hb_right_flux
                         ) * horz_left_edge_factor[ey, ex, eta]
                         u_k_cov[ey, ex, eta, 0] += (
-                            uv_flux_edge - uv_right_flux
-                        ) * horz_left_cov_factor[ey, ex, eta]
-                        u_k_cov[ey, ex, eta, 0] -= (
-                            0.5 * u_perp_right * v_cov_jump
-                        ) * horz_left_perp_factor[ey, ex, eta]
+                            u_flux_right - (uv_right_flux - v_contra_right_val * v_cov_right_val)
+                        ) * inv_endpoint_weight
+                        v_k_cov[ey, ex, eta, 0] += (
+                            v_flux_right - u_contra_right_val * v_cov_right_val
+                        ) * inv_endpoint_weight
                         u_k_cov[ey, ex, eta, 0] += (
                             0.25 * b_hat * (hh_left - hh_right)
-                        ) * horz_left_cov_factor[ey, ex, eta]
-                        v_k_cov[ey, ex, eta, 0] -= (
-                            0.5 * v_perp_right * v_cov_jump
-                        ) * horz_left_perp_factor[ey, ex, eta]
+                        ) * inv_endpoint_weight
 
         u_k = np.empty_like(u)
         v_k = np.empty_like(u)
