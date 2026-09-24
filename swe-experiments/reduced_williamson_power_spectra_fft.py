@@ -91,7 +91,7 @@ def make_latlon_grid(nlat, nlon):
 def evaluate_ke_latlon(solver, lat_grid, lon_grid):
     # Match power_spectra.py: form nodal KE first, then evaluate that DG field.
     ke_coeffs = {
-        name: 0.5 * face.h * (face.u ** 2 + face.v ** 2 + face.w ** 2)
+        name: 0.5 * (face.u ** 2 + face.v ** 2 + face.w ** 2) # face.h
         for name, face in solver.faces.items()
     }
 
@@ -102,7 +102,7 @@ def evaluate_enstrophy_latlon(solver, lat_grid, lon_grid):
 
     vort = solver.vorticity()
     enstrophy_coeffs = {
-        name: (vort[name] - face.f)**2 / face.h
+        name: (vort[name] - face.f)**2 # / face.h
         for name, face in solver.faces.items()
     }
 
@@ -269,7 +269,7 @@ def main():
     energy_list = []
     enstrophy_list = []
 
-    for day in range(721, 730):
+    for day in range(721, 731):
         fn_template = get_fn_template(day)
         coeffs_fp = os.path.join(data_dir, f'coeffs_{fn_template}.pkl')
         if compute:

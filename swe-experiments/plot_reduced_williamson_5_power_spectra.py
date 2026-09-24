@@ -53,10 +53,10 @@ axes[0].set_ylabel('Power')
 axes[1].set_title('Enstrophy')
 axes[1].set_ylabel('Power')
 
-ks = np.arange(100, 300)
-axes[0].loglog(ks, 3e3 * (ks / ks[0])**(-3.0), '--', color='black', label='$n^{-3}$')
+ks = np.arange(100, 1000)
+axes[0].loglog(ks, 1.0 * (ks / ks[0])**(-3.0), '--', color='black', label='$n^{-3}$')
 ks = np.arange(150, 500)
-axes[1].loglog(ks, 0.5e-14 * (ks / ks[0])**(-1.0), '--', color='black', label='$n^{-1}$')
+axes[1].loglog(ks, 0.5e-10 * (ks / ks[0])**(-1.0), '--', color='black', label='$n^{-1}$')
 
 for nx, resolution in zip(nxs, resolutions):
 
